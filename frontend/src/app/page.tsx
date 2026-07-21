@@ -118,8 +118,12 @@ const infoContent: Record<InfoTopic, { title: string; text: string; items: strin
 };
 
 function getErrorMessage(statusCode: number) {
-  if (statusCode === 400 || statusCode === 422) {
-    return "Hata 400/422: Geçersiz URL girdiniz. Lütfen https://example.com formatında geçerli bir bağlantı yazın.";
+  if (statusCode === 400) {
+    return "Hata 400: Geçersiz URL girdiniz. Lütfen https://example.com formatında geçerli bir bağlantı yazın.";
+  }
+
+  if (statusCode === 422) {
+    return "Hata 422: URL formatı doğrulanamadı. Lütfen https://example.com formatında geçerli bir bağlantı yazın.";
   }
 
   if (statusCode === 404) {
