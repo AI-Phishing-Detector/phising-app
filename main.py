@@ -1,66 +1,151 @@
-from fastapi import FastAPI, HTTPException, Depends
+from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, HttpUrl, EmailStr, field_validator
 from sqlalchemy.orm import Session
+from dotenv import load_dotenv
+import os
+import random
+import string
 
-from process_dataset import extract_features
+import database
 import models
-from database import engine, get_db
+from process_dataset import extract_features
 
-# Veritabanında tabloları otomatik oluşturur
-models.Base.metadata.create_all(bind=engine)
+# .env dosyasındaki değişkenleri yükle
+load_dotenv()
 
-app = FastAPI()
+# Veritabanı tablolarını otomatik oluştur
+models.Base.metadata.create_all(bind=database.engine)
 
-# Ön yüzün (Next.js) sunucuya bağlanabilmesi için gerekli izinler
+app = FastAPI(title="Phishing Detection API")
+
+# CORS Kısıtlaması
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Gelen verinin düzgün bir URL olmasını zorunlu tutuyoruz
+# --- ŞEMALAR (Pydantic) ---
 class URLSorgu(BaseModel):
     url: HttpUrl
 
-@app.get("/")
-def ana_sayfa():
-    return {"durum": "Backend aktif"}
+    @field_validator("url", mode="before")
+    @classmethod
+    def check_whitespace(cls, v):
+        if isinstance(v, str) and (" " in v or "\t" in v or "\n" in v):
+            raise ValueError("URL boşluk karakteri içeremez.")
+        return v
+
+class KayitOlRequest(BaseModel):
+    ad_soyad: str
+    email: EmailStr
+    sifre: str
+
+class GirisYapRequest(BaseModel):
+    email: EmailStr
+    sifre: str
+
+class SifreUnuttumRequest(BaseModel):
+    email: EmailStr
+
+
+# --- ENDPOINT'LER ---
 
 @app.post("/api/v1/scan-url")
-def url_tara(veri: URLSorgu, db: Session = Depends(get_db)):
-    url_str = str(veri.url)
-    
-    # Özellik çıkarma fonksiyonunu çalıştırıp hata kontrolü yapıyoruz
+def scan_url(payload: URLSorgu, db: Session = Depends(database.get_db)):
+    url_str = str(payload.url)
     try:
-        analiz_sonuclari = extract_features(url_str)
+        features = extract_features(url_str)
     except Exception as e:
         raise HTTPException(
-            status_code=500,
-            detail=f"Siteden özellikler çıkarılamadı: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Özellik çıkarılırken hata oluştu: {str(e)}"
         )
-    
-    # Sonuçları veritabanına kaydediyoruz
+
     try:
-        yeni_log = models.ScanLog(
+        db_log = models.ScanLog(
             url=url_str,
-            features=analiz_sonuclari,
-            prediction="Pending"
+            prediction="Başarılı",
+            features=features
         )
-        db.add(yeni_log)
+        db.add(db_log)
         db.commit()
-        db.refresh(yeni_log)
-    except Exception as db_err:
-        raise HTTPException(
-            status_code=500,
-            detail=f"Veritabanı kayıt hatası oluştu: {str(db_err)}"
-        )
+        db.refresh(db_log)
         
+        return {
+            "id": db_log.id,
+            "url": db_log.url,
+            "prediction": db_log.prediction,
+            "features": db_log.features
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Veritabanı kayıt hatası: {str(e)}"
+        )
+
+@app.post("/api/v1/register")
+async def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db)):
+    existing_user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="Bu e-posta adresi ile zaten kayıt olunmuş.")
+    
+    try:
+        new_user = models.User(
+            ad_soyad=payload.ad_soyad,
+            email=payload.email,
+            sifre=payload.sifre
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+
+        # --- TEST / KONSOL MODU (Kayıt Maili) ---
+        print("\n" + "="*50)
+        print(f"📧 [TEST MAİLİ - SİMÜLASYON]")
+        print(f"Kime (Alıcı) : {payload.email}")
+        print(f"Ad Soyad     : {payload.ad_soyad}")
+        print(f"Konu         : Aramıza Hoş Geldiniz - Kayıt Başarılı")
+        print(f"İçerik       : Kaydınız başarıyla oluşturulmuştur.")
+        print("="*50 + "\n")
+
+        return {"status": "success", "message": "Kayıt başarılı (Mail simülasyonu konsola yazdırıldı)."}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Kayıt hatası: {str(e)}")
+
+@app.post("/api/v1/login")
+def login_user(payload: GirisYapRequest, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.email == payload.email, models.User.sifre == payload.sifre).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="E-posta veya şifre hatalı.")
+    
+    return {"status": "success", "message": "Giriş başarılı.", "ad_soyad": user.ad_soyad}
+
+@app.post("/api/v1/forgot-password")
+async def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database.get_db)):
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="Bu e-posta adresine ait kayıt bulunamadı.")
+    
+    # Yeni geçici şifre üretme
+    yeni_sifre = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
+    user.sifre = yeni_sifre
+    db.commit()
+
+    # --- TEST / KONSOL MODU (Şifre Sıfırlama Maili) ---
+    print("\n" + "="*50)
+    print(f"🔑 [TEST ŞİFRE MAİLİ - SİMÜLASYON]")
+    print(f"Kime (Alıcı)       : {payload.email}")
+    print(f"Yeni Geçici Şifre  : {yeni_sifre}")
+    print("="*50 + "\n")
+
     return {
-        "id": yeni_log.id,
-        "url": url_str,
-        "durum": "Başarılı",
-        "analiz_verileri": analiz_sonuclari
+        "status": "success", 
+        "message": "Yeni şifreniz (test simülasyonu ile) konsola yazdırıldı.",
+        "debug_yeni_sifre": yeni_sifre
     }
