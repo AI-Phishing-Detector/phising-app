@@ -8,3 +8,5 @@ requests
 fastapi-mail
 psycopg2-binary
 email-validator
+pytest
+pytest-mock

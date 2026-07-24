@@ -7,11 +7,14 @@ from dotenv import load_dotenv
 # .env dosyasındaki değişkenleri oku
 load_dotenv()
 
-# Veritabanı adresini gizli şekilde .env'den alıyoruz
-SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./phishing.db")
+# .env içinde DATABASE_URL zorunlu kılındı (fallback kaldırıldı)
+SQLALCHEMY_DATABASE_URL = os.environ["DATABASE_URL"]
+
+# check_same_thread parametresi sadece SQLite için geçerlidir PostgreSQLde hata vermemesi için koşullu yaptık
+connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
 
 engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False}
+    SQLALCHEMY_DATABASE_URL, connect_args=connect_args
 )
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
