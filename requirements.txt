@@ -10,3 +10,5 @@ psycopg2-binary
 email-validator
 pytest
 pytest-mock
+pandas
+tldextract
