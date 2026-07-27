@@ -1,3 +1,4 @@
 .env
 phishing.db
+*.db
 __pycache__/

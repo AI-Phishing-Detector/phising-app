@@ -11,7 +11,7 @@ load_dotenv()
 SQLALCHEMY_DATABASE_URL = os.environ["DATABASE_URL"]
 
 # check_same_thread parametresi sadece SQLite için geçerlidir PostgreSQLde hata vermemesi için koşullu yaptık
-connect_args = {"check_same_thread": False} if SQLALCHEMY_DATABASE_URL.startswith("sqlite") else {}
+connect_args = {"check_same_thread": False} if "sqlite" in SQLALCHEMY_DATABASE_URL.lower() else {}
 
 engine = create_engine(
     SQLALCHEMY_DATABASE_URL, connect_args=connect_args
