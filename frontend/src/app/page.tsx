@@ -21,7 +21,12 @@ type ResultVariant = "safe" | "danger" | "neutral";
 type InfoTopic = "phishing" | "protection" | "workflow";
 type AuthMode = "login" | "register" | "forgot" | "profile" | null;
 type PageView = "home" | "history";
-type StoredUser = { name: string; email: string; password: string };
+type AuthApiResponse = {
+  status?: string;
+  message?: string;
+  detail?: string | { msg?: string }[];
+  ad_soyad?: string;
+};
 
 type ResultView = {
   variant: ResultVariant;
@@ -40,28 +45,54 @@ type ScanHistoryItem = {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const REQUEST_TIMEOUT_MS = 15000;
 const infoTopics: InfoTopic[] = ["phishing", "protection", "workflow"];
-const USER_STORAGE_PREFIX = "phishing-user:";
 
-function getUserStorageKey(email: string) {
-  return `${USER_STORAGE_PREFIX}${email.trim().toLowerCase()}`;
+function getApiErrorText(response: AuthApiResponse, fallback: string) {
+  if (typeof response.detail === "string") return response.detail;
+  if (Array.isArray(response.detail) && response.detail[0]?.msg) return response.detail[0].msg;
+
+  return response.message ?? fallback;
 }
 
-function readStoredUser(email: string): StoredUser | null {
-  if (typeof window === "undefined") return null;
-
-  const storedUser = window.localStorage.getItem(getUserStorageKey(email));
-
-  if (!storedUser) return null;
+async function postAuthRequest(endpoint: string, body: Record<string, string>) {
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
-    return JSON.parse(storedUser) as StoredUser;
-  } catch {
-    return null;
-  }
-}
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
 
-function saveStoredUser(user: StoredUser) {
-  window.localStorage.setItem(getUserStorageKey(user.email), JSON.stringify(user));
+    const data = (await response.json().catch(() => ({}))) as AuthApiResponse;
+
+    if (!response.ok) {
+      if (response.status === 404 && endpoint === "/api/v1/change-password") {
+        throw new Error("Şifre değiştirme servisi backend tarafında henüz hazır değil.");
+      }
+
+      throw new Error(getApiErrorText(data, `Hata ${response.status}: İşlem tamamlanamadı.`));
+    }
+
+    return data;
+  } catch (requestError) {
+    if (requestError instanceof DOMException && requestError.name === "AbortError") {
+      throw new Error("Backend 15 saniye içinde cevap vermedi. Lütfen daha sonra tekrar deneyin.");
+    }
+
+    if (requestError instanceof TypeError) {
+      throw new Error(
+        "Backend sunucusuna ulaşılamadı. Lütfen FastAPI servisinin http://localhost:8000 adresinde açık olduğundan emin olun.",
+      );
+    }
+
+    throw requestError;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
 }
 
 function getPasswordStrength(password: string) {
@@ -184,7 +215,6 @@ function getResultView(result: BackendResponse): ResultView {
       "Backend URL özelliklerini çıkardı. Yapay zeka sonucu geldiğinde güvenli veya zararlı durumu burada gösterilecek.",
   };
 }
-
 function getResultClasses(variant: ResultVariant) {
   if (variant === "danger") {
     return {
@@ -227,6 +257,7 @@ export default function Home() {
   const [newPassword, setNewPassword] = useState("");
   const [resetEmail, setResetEmail] = useState("");
   const [authNotice, setAuthNotice] = useState("");
+  const [authStatus, setAuthStatus] = useState<ScanState>("idle");
   const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
@@ -261,71 +292,89 @@ export default function Home() {
     clearAuthFields();
   }
 
-  function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const normalizedEmail = userEmail.trim().toLowerCase();
 
-    if (authMode === "forgot") {
-      const userForReset = readStoredUser(resetEmail);
+    setAuthStatus("loading");
+    setAuthNotice("");
+    setShowRegisterPrompt(false);
 
-      if (!userForReset) {
-        setAuthNotice("");
-        setShowRegisterPrompt(true);
-        setUserEmail(resetEmail.trim().toLowerCase());
+    try {
+      if (authMode === "forgot") {
+        await postAuthRequest("/api/v1/forgot-password", {
+          email: resetEmail.trim().toLowerCase(),
+        });
+
+        setAuthNotice("Yeni şifreniz Gmail hesabınıza gönderildi.");
+        setResetEmail("");
         return;
       }
 
-      setAuthNotice("Şifre sıfırlama kodu Gmail adresinize gönderildi. Backend hazır olduğunda bu işlem gerçek e-posta servisine bağlanacak.");
-      return;
-    }
+      if (authMode === "profile") {
+        if (!newPassword) {
+          setAuthNotice("Lütfen yeni şifrenizi yazın.");
+          return;
+        }
 
-    if (authMode === "profile") {
-      if (!newPassword) {
-        setAuthNotice("Lütfen yeni şifrenizi yazın.");
+        if (getPasswordStrength(newPassword).score < 50) {
+          setAuthNotice("Yeni şifre güvenliği düşük. En az 8 karakter, büyük harf, sayı veya özel karakter kullanın.");
+          return;
+        }
+
+        await postAuthRequest("/api/v1/change-password", {
+          email: userEmail,
+          yeni_sifre: newPassword,
+        });
+
+        setNewPassword("");
+        setAuthNotice("Şifreniz başarıyla güncellendi.");
         return;
       }
 
-      const currentUser = readStoredUser(userEmail);
+      if (authMode === "register") {
+        if (!userName.trim()) {
+          setAuthNotice("Lütfen ad soyad bilginizi yazın.");
+          return;
+        }
 
-      if (getPasswordStrength(newPassword).score < 50) {
-        setAuthNotice("Yeni şifre güvenliği düşük. En az 8 karakter, büyük harf, sayı veya özel karakter kullanın.");
+        if (password !== confirmPassword) {
+          setAuthNotice("Şifreler eşleşmiyor. Lütfen şifrenizi tekrar kontrol edin.");
+          return;
+        }
+
+        if (getPasswordStrength(password).score < 50) {
+          setAuthNotice("Şifre güvenliği düşük. En az 8 karakter, büyük harf, sayı veya özel karakter kullanın.");
+          return;
+        }
+
+        const data = await postAuthRequest("/api/v1/register", {
+          ad_soyad: userName.trim(),
+          email: normalizedEmail,
+          sifre: password,
+        });
+
+        setIsLoggedIn(true);
+        setUserEmail(normalizedEmail);
+        setUserName(userName.trim());
+        setAuthMode(null);
+        setPageView("home");
+        setPassword("");
+        setConfirmPassword("");
+        setNewPassword("");
+        setResetEmail("");
+        setAuthNotice(data.message ?? "Kayıt başarılı.");
         return;
       }
 
-      if (currentUser) {
-        saveStoredUser({ ...currentUser, password: newPassword });
-      }
+      const data = await postAuthRequest("/api/v1/login", {
+        email: normalizedEmail,
+        sifre: password,
+      });
 
-      setPassword(newPassword);
-      setNewPassword("");
-      setAuthNotice("Şifreniz güncellendi.");
-      return;
-    }
-
-    if (authMode === "register") {
-      if (!userName.trim()) {
-        setAuthNotice("Lütfen ad soyad bilginizi yazın.");
-        return;
-      }
-
-      if (password !== confirmPassword) {
-        setAuthNotice("Şifreler eşleşmiyor. Lütfen şifrenizi tekrar kontrol edin.");
-        return;
-      }
-
-      if (getPasswordStrength(password).score < 50) {
-        setAuthNotice("Şifre güvenliği düşük. En az 8 karakter, büyük harf, sayı veya özel karakter kullanın.");
-        return;
-      }
-
-      if (readStoredUser(normalizedEmail)) {
-        setAuthNotice("Bu Gmail adresiyle zaten kayıt olunmuş. Lütfen giriş yapın.");
-        return;
-      }
-
-      saveStoredUser({ name: userName.trim(), email: normalizedEmail, password });
       setIsLoggedIn(true);
+      setUserName(data.ad_soyad ?? "Kullanıcı");
       setUserEmail(normalizedEmail);
       setAuthMode(null);
       setPageView("home");
@@ -334,35 +383,31 @@ export default function Home() {
       setNewPassword("");
       setResetEmail("");
       setAuthNotice("");
-      return;
+    } catch (requestError) {
+      if (requestError instanceof Error) {
+        const message = requestError.message;
+        const lowerMessage = message.toLowerCase();
+
+        if (authMode === "profile" && message.includes("404")) {
+          setAuthNotice("Şifre değiştirme servisi backend tarafında henüz hazır değil.");
+          return;
+        }
+
+        if (authMode === "login" && (lowerMessage.includes("kayıt bulunamadı") || lowerMessage.includes("bulunamadı"))) {
+          setShowRegisterPrompt(true);
+          setAuthNotice("");
+          return;
+        }
+
+        setAuthNotice(message);
+        return;
+      }
+
+      setAuthNotice("İşlem tamamlanamadı. Lütfen tekrar deneyin.");
+    } finally {
+      setAuthStatus("idle");
     }
-
-    const storedUser = readStoredUser(normalizedEmail);
-
-    if (!storedUser) {
-      setAuthNotice("");
-      setShowRegisterPrompt(true);
-      return;
-    }
-
-    if (storedUser.password !== password) {
-      setShowRegisterPrompt(false);
-      setAuthNotice("Şifre yanlış. Lütfen tekrar deneyin.");
-      return;
-    }
-
-    setIsLoggedIn(true);
-    setUserName(storedUser.name);
-    setUserEmail(storedUser.email);
-    setAuthMode(null);
-    setPageView("home");
-    setPassword("");
-    setConfirmPassword("");
-    setNewPassword("");
-    setResetEmail("");
-    setAuthNotice("");
   }
-
   function handleLogout() {
     setIsLoggedIn(false);
     setIsProfileMenuOpen(false);
@@ -786,8 +831,20 @@ export default function Home() {
                   </div>
                 )}
 
-                <button type="submit" className="w-full rounded-2xl bg-black px-5 py-4 font-semibold text-white transition hover:bg-black/80">
-                  {authMode === "forgot" ? "Gmail'e kod gönder" : authMode === "profile" ? "Şifreyi değiştir" : authMode === "register" ? "Kayıt Ol" : "Giriş Yap"}
+                <button
+                  type="submit"
+                  disabled={authStatus === "loading"}
+                  className="w-full rounded-2xl bg-black px-5 py-4 font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:bg-black/50"
+                >
+                  {authStatus === "loading"
+                    ? "İşleniyor..."
+                    : authMode === "forgot"
+                      ? "Gmail'e kod gönder"
+                      : authMode === "profile"
+                        ? "Şifreyi değiştir"
+                        : authMode === "register"
+                          ? "Kayıt Ol"
+                          : "Giriş Yap"}
                 </button>
               </form>
 
