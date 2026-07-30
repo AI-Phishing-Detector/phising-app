@@ -1,6 +1,8 @@
+from typing import Literal
+
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl, EmailStr, field_validator
+from pydantic import BaseModel, HttpUrl, EmailStr, Field, ConfigDict, field_validator
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import os
@@ -43,6 +45,37 @@ class URLSorgu(BaseModel):
             raise ValueError("URL boşluk karakteri içeremez.")
         return v
 
+
+class URLAnalizDetayi(BaseModel):
+    """
+    Modelin ürettiği analiz ayrıntılarının API sözleşmesini tanımlar.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phishingProbability: float = Field(ge=0, le=100)
+    safeProbability: float = Field(ge=0, le=100)
+    entropy: float
+
+
+class URLTaramaResponse(BaseModel):
+    """
+    Mobil uygulamanın tarama endpointinden beklediği
+    zorunlu yanıt alanlarını tanımlar.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    url: HttpUrl
+    verdict: Literal["safe", "dangerous"]
+    riskScore: float = Field(ge=0, le=100)
+    title: str
+    message: str
+    details: URLAnalizDetayi
+    features: dict[str, int | float | str]
+
+
 class KayitOlRequest(BaseModel):
     ad_soyad: str
     email: EmailStr
@@ -58,7 +91,10 @@ class SifreUnuttumRequest(BaseModel):
 
 # --- ENDPOINT'LER ---
 
-@app.post("/api/v1/scan-url")
+@app.post(
+    "/api/v1/scan-url",
+    response_model=URLTaramaResponse,
+)
 def scan_url(
     payload: URLSorgu,
     db: Session = Depends(database.get_db),

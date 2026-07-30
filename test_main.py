@@ -11,12 +11,13 @@ from fastapi.testclient import TestClient
 import database
 from main import app
 
+
 # 2. ADIM: TEST BİTTİĞİNDE test.db DOSYASINI OTOMATİK SİL
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_test_db():
-    yield  # Testlerin normalce çalışmasına izin ver
+    yield  # Testlerin normal şekilde çalışmasına izin ver
 
-    # Tüm testler bittikten sonra arkada kalan test.db dosyasını sil
+    # Test veritabanı gerçek uygulama veritabanından ayrı tutulur.
     if os.path.exists(test_db_path):
         try:
             os.remove(test_db_path)
@@ -37,11 +38,11 @@ def test_read_root():
 # /api/v1/scan-url ENDPOINT TESTLERİ
 # =====================================================================
 
-# --- SENARYO 1: Başarılı İstek (200 OK) ---
+# --- SENARYO 1: Mock Model ile Başarılı İstek (200 OK) ---
 def test_scan_url_success(mocker):
     """
-    Geçerli bir URL gönderildiğinde model analizini mock'layarak
-    200 OK dönmesini ve mobilin beklediği JSON yanıtını test eder.
+    Endpoint sözleşmesini modelden bağımsız test edebilmek için
+    analiz sonucunu mock'lar.
     """
     sahte_ozellikler = {
         "url_uzunlugu": 19,
@@ -86,11 +87,48 @@ def test_scan_url_success(mocker):
     assert veri["features"] == sahte_ozellikler
 
 
-# --- SENARYO 2: Boşluklu / Geçersiz URL (422 Unprocessable Entity) ---
+# --- SENARYO 2: Gerçek Model Entegrasyon / Smoke Testi ---
+def test_scan_url_real_model_smoke():
+    """
+    Mock kullanmadan gerçek model dosyalarını, özellik çıkarımını,
+    scaler dönüşümünü ve predict işlemini uçtan uca çalıştırır.
+
+    Bu testin amacı belirli bir risk yüzdesini sabitlemek değil,
+    model pipeline'ının gerçekten çalıştığını doğrulamaktır.
+    """
+    response = client.post(
+        "/api/v1/scan-url",
+        json={"url": "https://www.google.com"},
+    )
+
+    assert response.status_code == 200
+
+    veri = response.json()
+
+    assert veri["url"] == "https://www.google.com/"
+    assert veri["verdict"] in {"safe", "dangerous"}
+    assert 0 <= veri["riskScore"] <= 100
+    assert isinstance(veri["title"], str)
+    assert veri["title"]
+    assert isinstance(veri["message"], str)
+    assert veri["message"]
+
+    detaylar = veri["details"]
+
+    assert 0 <= detaylar["phishingProbability"] <= 100
+    assert 0 <= detaylar["safeProbability"] <= 100
+    assert isinstance(detaylar["entropy"], (int, float))
+    assert detaylar["phishingProbability"] == veri["riskScore"]
+
+    assert isinstance(veri["features"], dict)
+    assert veri["features"]
+
+
+# --- SENARYO 3: Boşluklu / Geçersiz URL (422) ---
 def test_scan_url_invalid_url():
     """
-    Boşluk içeren veya geçersiz bir URL gönderildiğinde
-    Pydantic validasyonunun devreye girip 422 dönmesini test eder.
+    Geçersiz bir URL gönderildiğinde Pydantic doğrulamasının
+    devreye girip 422 dönmesini test eder.
     """
     response = client.post(
         "/api/v1/scan-url",
@@ -100,7 +138,7 @@ def test_scan_url_invalid_url():
     assert response.status_code == 422
 
 
-# --- SENARYO 3A: Model Analizi Hatası (500 Internal Server Error) ---
+# --- SENARYO 4A: Model Analizi Hatası (500) ---
 def test_scan_url_analysis_error(mocker):
     """
     analyze_url fonksiyonu hata fırlattığında endpoint'in
@@ -123,11 +161,11 @@ def test_scan_url_analysis_error(mocker):
     )
 
 
-# --- SENARYO 3B: Veritabanı Hatası ve Rollback Doğrulaması ---
+# --- SENARYO 4B: Veritabanı Hatası ve Rollback ---
 def test_scan_url_db_error_and_rollback(mocker):
     """
     Veritabanı kaydı sırasında commit() hata verdiğinde rollback()
-    yapıldığını ve 500 dönüldüğünü test eder.
+    yapıldığını ve endpoint'in 500 döndürdüğünü test eder.
     """
     sahte_analiz = {
         "verdict": "dangerous",
