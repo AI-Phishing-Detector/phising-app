@@ -22,20 +22,20 @@ function isScanResult(value: unknown): value is ScanResult {
   );
 }
 
-async function getErrorMessage(response: Response) {
-  try {
-    const errorBody = (await response.json()) as {
-      detail?: string;
-    };
-
-    if (typeof errorBody.detail === "string") {
-      return errorBody.detail;
-    }
-  } catch {
-    // Sunucu JSON hata cevabı vermediyse genel mesaj kullanılır.
+function getHttpErrorMessage(status: number): string {
+  if (status === 400 || status === 422) {
+    return "Lütfen geçerli bir URL girin.";
   }
 
-  return `Sunucu isteği tamamlayamadı. Hata kodu: ${response.status}`;
+  if (status === 429) {
+    return "Çok fazla tarama isteği gönderildi. Lütfen biraz bekleyip tekrar deneyin.";
+  }
+
+  if (status >= 500) {
+    return "Sunucuda bir sorun oluştu. Lütfen daha sonra tekrar deneyin.";
+  }
+
+  return "Tarama isteği tamamlanamadı. Lütfen tekrar deneyin.";
 }
 
 export async function scanUrl(url: string): Promise<ScanResult> {
@@ -62,14 +62,15 @@ export async function scanUrl(url: string): Promise<ScanResult> {
     });
 
     if (!response.ok) {
-      const errorMessage = await getErrorMessage(response);
-      throw new Error(errorMessage);
+      throw new Error(getHttpErrorMessage(response.status));
     }
 
     const responseBody: unknown = await response.json();
 
     if (!isScanResult(responseBody)) {
-      throw new Error("Sunucudan beklenmeyen bir analiz sonucu geldi.");
+      throw new Error(
+        "Sunucudan beklenmeyen bir analiz sonucu geldi. Lütfen tekrar deneyin.",
+      );
     }
 
     return {
@@ -80,12 +81,14 @@ export async function scanUrl(url: string): Promise<ScanResult> {
     };
   } catch (error) {
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("Sunucu 15 saniye içinde cevap vermedi.");
+      throw new Error(
+        "Sunucu zamanında cevap vermedi. Lütfen daha sonra tekrar deneyin.",
+      );
     }
 
     if (error instanceof TypeError) {
       throw new Error(
-        "Backend sunucusuna ulaşılamadı. İnternet veya sunucu bağlantısını kontrol edin.",
+        "Sunucuya ulaşılamadı. İnternet veya sunucu bağlantısını kontrol edin.",
       );
     }
 
@@ -93,7 +96,9 @@ export async function scanUrl(url: string): Promise<ScanResult> {
       throw error;
     }
 
-    throw new Error("Tarama sırasında beklenmeyen bir sorun oluştu.");
+    throw new Error(
+      "Tarama sırasında beklenmeyen bir sorun oluştu. Lütfen tekrar deneyin.",
+    );
   } finally {
     clearTimeout(timeoutId);
   }
