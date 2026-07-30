@@ -1,8 +1,18 @@
 import type { ScanResult } from "../types/scan";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, "");
-
 const REQUEST_TIMEOUT_MS = 15_000;
+
+/**
+ * Yalnızca uygulama tarafından güvenli hâle getirilen mesajların
+ * kullanıcı arayüzüne ulaşmasını sağlar.
+ */
+class UserFacingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UserFacingError";
+  }
+}
 
 function isScanResult(value: unknown): value is ScanResult {
   if (!value || typeof value !== "object") {
@@ -40,8 +50,8 @@ function getHttpErrorMessage(status: number): string {
 
 export async function scanUrl(url: string): Promise<ScanResult> {
   if (!API_BASE_URL) {
-    throw new Error(
-      "Backend adresi bulunamadı. EXPO_PUBLIC_API_URL ayarını kontrol edin.",
+    throw new UserFacingError(
+      "Tarama servisi kullanıma hazır değil. Lütfen daha sonra tekrar deneyin.",
     );
   }
 
@@ -62,14 +72,14 @@ export async function scanUrl(url: string): Promise<ScanResult> {
     });
 
     if (!response.ok) {
-      throw new Error(getHttpErrorMessage(response.status));
+      throw new UserFacingError(getHttpErrorMessage(response.status));
     }
 
     const responseBody: unknown = await response.json();
 
     if (!isScanResult(responseBody)) {
-      throw new Error(
-        "Sunucudan beklenmeyen bir analiz sonucu geldi. Lütfen tekrar deneyin.",
+      throw new UserFacingError(
+        "Tarama sonucu görüntülenemedi. Lütfen tekrar deneyin.",
       );
     }
 
@@ -80,24 +90,25 @@ export async function scanUrl(url: string): Promise<ScanResult> {
       message: responseBody.message,
     };
   } catch (error) {
+    if (error instanceof UserFacingError) {
+      throw error;
+    }
+
     if (error instanceof Error && error.name === "AbortError") {
-      throw new Error(
+      throw new UserFacingError(
         "Sunucu zamanında cevap vermedi. Lütfen daha sonra tekrar deneyin.",
       );
     }
 
     if (error instanceof TypeError) {
-      throw new Error(
+      throw new UserFacingError(
         "Sunucuya ulaşılamadı. İnternet veya sunucu bağlantısını kontrol edin.",
       );
     }
 
-    if (error instanceof Error) {
-      throw error;
-    }
-
-    throw new Error(
-      "Tarama sırasında beklenmeyen bir sorun oluştu. Lütfen tekrar deneyin.",
+    // SyntaxError ve diğer teknik hataların arayüze sızması engellenir.
+    throw new UserFacingError(
+      "Tarama sırasında bir sorun oluştu. Lütfen tekrar deneyin.",
     );
   } finally {
     clearTimeout(timeoutId);

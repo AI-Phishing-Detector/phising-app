@@ -1,15 +1,31 @@
 import type {
-    AuthResponse,
-    ForgotPasswordRequest,
-    ForgotPasswordResponse,
-    LoginRequest,
-    LoginResponse,
-    RegisterRequest,
-    RegisterResponse,
+  AuthResponse,
+  ForgotPasswordRequest,
+  ForgotPasswordResponse,
+  LoginRequest,
+  LoginResponse,
+  RegisterRequest,
+  RegisterResponse,
 } from "../types/auth";
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL?.replace(/\/+$/, "");
 const REQUEST_TIMEOUT_MS = 15_000;
+
+type AuthEndpoint =
+  | "/api/v1/login"
+  | "/api/v1/register"
+  | "/api/v1/forgot-password";
+
+/**
+ * Backend'in teknik hata ayrıntılarının kullanıcı arayüzüne
+ * doğrudan gönderilmesini engeller.
+ */
+class UserFacingError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "UserFacingError";
+  }
+}
 
 function isAuthResponse(value: unknown): value is AuthResponse {
   if (!value || typeof value !== "object") {
@@ -19,7 +35,8 @@ function isAuthResponse(value: unknown): value is AuthResponse {
   const response = value as Partial<AuthResponse>;
 
   return (
-    typeof response.status === "string" && typeof response.message === "string"
+    typeof response.status === "string" &&
+    typeof response.message === "string"
   );
 }
 
@@ -31,30 +48,51 @@ function isLoginResponse(value: unknown): value is LoginResponse {
   return typeof (value as Partial<LoginResponse>).ad_soyad === "string";
 }
 
-async function getErrorMessage(response: Response) {
-  try {
-    const errorBody = (await response.json()) as {
-      detail?: string;
-    };
-
-    if (typeof errorBody.detail === "string") {
-      return errorBody.detail;
-    }
-  } catch {
-    // Sunucu JSON hata cevabı vermediyse genel mesaj kullanılır.
+function getHttpErrorMessage(
+  status: number,
+  endpoint: AuthEndpoint,
+): string {
+  if (
+    endpoint === "/api/v1/login" &&
+    (status === 400 || status === 401)
+  ) {
+    return "E-posta veya şifre hatalı.";
   }
 
-  return `Sunucu isteği tamamlayamadı. Hata kodu: ${response.status}`;
+  if (
+    endpoint === "/api/v1/register" &&
+    (status === 400 || status === 409)
+  ) {
+    return "Bu e-posta adresiyle zaten kayıt olunmuş olabilir.";
+  }
+
+  if (endpoint === "/api/v1/forgot-password" && status === 404) {
+    return "Bu e-posta adresine ait bir hesap bulunamadı.";
+  }
+
+  if (status === 400 || status === 422) {
+    return "Lütfen girdiğiniz bilgileri kontrol edip tekrar deneyin.";
+  }
+
+  if (status === 429) {
+    return "Çok fazla istek gönderildi. Lütfen biraz bekleyip tekrar deneyin.";
+  }
+
+  if (status >= 500) {
+    return "Sunucuda bir sorun oluştu. Lütfen daha sonra tekrar deneyin.";
+  }
+
+  return "İşlem tamamlanamadı. Lütfen tekrar deneyin.";
 }
 
 async function postRequest<TRequest, TResponse>(
-  endpoint: string,
+  endpoint: AuthEndpoint,
   payload: TRequest,
   validateResponse: (value: unknown) => value is TResponse,
 ): Promise<TResponse> {
   if (!API_BASE_URL) {
-    throw new Error(
-      "Backend adresi bulunamadı. EXPO_PUBLIC_API_URL ayarını kontrol edin.",
+    throw new UserFacingError(
+      "Hesap servisi kullanıma hazır değil. Lütfen daha sonra tekrar deneyin.",
     );
   }
 
@@ -75,33 +113,41 @@ async function postRequest<TRequest, TResponse>(
     });
 
     if (!response.ok) {
-      const errorMessage = await getErrorMessage(response);
-      throw new Error(errorMessage);
+      throw new UserFacingError(
+        getHttpErrorMessage(response.status, endpoint),
+      );
     }
 
     const responseBody: unknown = await response.json();
 
     if (!validateResponse(responseBody)) {
-      throw new Error("Sunucudan beklenmeyen bir cevap geldi.");
+      throw new UserFacingError(
+        "Sunucu cevabı işlenemedi. Lütfen tekrar deneyin.",
+      );
     }
 
     return responseBody;
   } catch (error) {
-    if (error instanceof Error && error.name === "AbortError") {
-      throw new Error("Sunucu 15 saniye içinde cevap vermedi.");
-    }
-
-    if (error instanceof TypeError) {
-      throw new Error(
-        "Backend sunucusuna ulaşılamadı. İnternet veya sunucu bağlantısını kontrol edin.",
-      );
-    }
-
-    if (error instanceof Error) {
+    if (error instanceof UserFacingError) {
       throw error;
     }
 
-    throw new Error("İşlem sırasında beklenmeyen bir sorun oluştu.");
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new UserFacingError(
+        "Sunucu zamanında cevap vermedi. Lütfen daha sonra tekrar deneyin.",
+      );
+    }
+
+    if (error instanceof TypeError) {
+      throw new UserFacingError(
+        "Sunucuya ulaşılamadı. İnternet veya sunucu bağlantısını kontrol edin.",
+      );
+    }
+
+    // JSON ayrıştırma ve diğer teknik hatalar kullanıcıya gösterilmez.
+    throw new UserFacingError(
+      "İşlem sırasında bir sorun oluştu. Lütfen tekrar deneyin.",
+    );
   } finally {
     clearTimeout(timeoutId);
   }
@@ -120,5 +166,9 @@ export function registerUser(
 export function forgotPassword(
   payload: ForgotPasswordRequest,
 ): Promise<ForgotPasswordResponse> {
-  return postRequest("/api/v1/forgot-password", payload, isAuthResponse);
+  return postRequest(
+    "/api/v1/forgot-password",
+    payload,
+    isAuthResponse,
+  );
 }
