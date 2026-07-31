@@ -1,6 +1,8 @@
+from typing import Literal
+
 from fastapi import FastAPI, Depends, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, HttpUrl, EmailStr, field_validator
+from pydantic import BaseModel, HttpUrl, EmailStr, Field, ConfigDict, field_validator
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import os
@@ -9,7 +11,7 @@ import string
 
 import database
 import models
-from process_dataset import extract_features
+from model_service import analyze_url
 
 # .env dosyasındaki değişkenleri yükle
 load_dotenv()
@@ -22,7 +24,11 @@ app = FastAPI(title="Phishing Detection API")
 # CORS Kısıtlaması
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://localhost:8081",
+        "http://127.0.0.1:8081",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -39,6 +45,37 @@ class URLSorgu(BaseModel):
             raise ValueError("URL boşluk karakteri içeremez.")
         return v
 
+
+class URLAnalizDetayi(BaseModel):
+    """
+    Modelin ürettiği analiz ayrıntılarının API sözleşmesini tanımlar.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    phishingProbability: float = Field(ge=0, le=100)
+    safeProbability: float = Field(ge=0, le=100)
+    entropy: float
+
+
+class URLTaramaResponse(BaseModel):
+    """
+    Mobil uygulamanın tarama endpointinden beklediği
+    zorunlu yanıt alanlarını tanımlar.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: int
+    url: HttpUrl
+    verdict: Literal["safe", "dangerous"]
+    riskScore: float = Field(ge=0, le=100)
+    title: str
+    message: str
+    details: URLAnalizDetayi
+    features: dict[str, int | float | str]
+
+
 class KayitOlRequest(BaseModel):
     ad_soyad: str
     email: EmailStr
@@ -54,39 +91,50 @@ class SifreUnuttumRequest(BaseModel):
 
 # --- ENDPOINT'LER ---
 
-@app.post("/api/v1/scan-url")
-def scan_url(payload: URLSorgu, db: Session = Depends(database.get_db)):
+@app.post(
+    "/api/v1/scan-url",
+    response_model=URLTaramaResponse,
+)
+def scan_url(
+    payload: URLSorgu,
+    db: Session = Depends(database.get_db),
+):
     url_str = str(payload.url)
+
     try:
-        features = extract_features(url_str)
-    except Exception as e:
+        analysis = analyze_url(url_str)
+    except Exception as error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Özellik çıkarılırken hata oluştu: {str(e)}"
-        )
+            detail=f"URL analizi tamamlanamadı: {str(error)}",
+        ) from error
 
     try:
         db_log = models.ScanLog(
             url=url_str,
-            prediction="Başarılı",
-            features=features
+            prediction=analysis["verdict"],
+            features=analysis["features"],
         )
         db.add(db_log)
         db.commit()
         db.refresh(db_log)
-        
+
         return {
             "id": db_log.id,
             "url": db_log.url,
-            "prediction": db_log.prediction,
-            "features": db_log.features
+            "verdict": analysis["verdict"],
+            "riskScore": analysis["riskScore"],
+            "title": analysis["title"],
+            "message": analysis["message"],
+            "details": analysis["details"],
+            "features": analysis["features"],
         }
-    except Exception as e:
+    except Exception as error:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Veritabanı kayıt hatası: {str(e)}"
-        )
+            detail=f"Veritabanı kayıt hatası: {str(error)}",
+        ) from error
 
 @app.post("/api/v1/register")
 async def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db)):

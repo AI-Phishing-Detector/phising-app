@@ -3,3 +3,6 @@ phishing.db
 *.db
 __pycache__/
 venv312/
+*.py[cod]
+.pytest_cache/
+.venv/
