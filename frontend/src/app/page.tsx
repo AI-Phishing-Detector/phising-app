@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type BackendResponse = {
   url?: string;
@@ -26,7 +26,18 @@ type AuthApiResponse = {
   message?: string;
   detail?: string | { msg?: string }[];
   ad_soyad?: string;
+  email?: string;
 };
+
+class ApiRequestError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
 
 type ResultView = {
   variant: ResultVariant;
@@ -53,29 +64,61 @@ function getApiErrorText(response: AuthApiResponse, fallback: string) {
   return response.message ?? fallback;
 }
 
-async function postAuthRequest(endpoint: string, body: Record<string, string>) {
+type ApiRequestOptions = {
+  method?: string;
+  body?: Record<string, string>;
+  onUnauthorized?: () => void;
+};
+
+async function apiRequest<T extends AuthApiResponse>(
+  endpoint: string,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  const { method = "GET", body, onUnauthorized } = options;
   const controller = new AbortController();
   const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
 
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
-      method: "POST",
+      method,
       credentials: "include",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify(body),
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
       signal: controller.signal,
     });
 
-    const data = (await response.json().catch(() => ({}))) as AuthApiResponse;
+    const data = (await response.json().catch(() => ({}))) as T;
+
+    if (response.status === 401 || response.status === 403) {
+      if (onUnauthorized) {
+        onUnauthorized();
+        throw new ApiRequestError(
+          response.status,
+          response.status === 401
+            ? "Oturumunuz sona erdi. Lütfen tekrar giriş yapın."
+            : "Bu işlem için yetkiniz bulunmuyor. Lütfen tekrar giriş yapın.",
+        );
+      }
+
+      throw new ApiRequestError(
+        response.status,
+        getApiErrorText(data, `Hata ${response.status}: İşlem tamamlanamadı.`),
+      );
+    }
 
     if (!response.ok) {
-      throw new Error(getApiErrorText(data, `Hata ${response.status}: İşlem tamamlanamadı.`));
+      throw new ApiRequestError(
+        response.status,
+        getApiErrorText(data, `Hata ${response.status}: İşlem tamamlanamadı.`),
+      );
     }
 
     return data;
   } catch (requestError) {
+    if (requestError instanceof ApiRequestError) {
+      throw requestError;
+    }
+
     if (requestError instanceof DOMException && requestError.name === "AbortError") {
       throw new Error("Backend 15 saniye içinde cevap vermedi. Lütfen daha sonra tekrar deneyin.");
     }
@@ -259,6 +302,7 @@ export default function Home() {
   const [isPasswordVisible, setIsPasswordVisible] = useState(false);
   const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isSessionChecking, setIsSessionChecking] = useState(true);
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
 
@@ -289,6 +333,64 @@ export default function Home() {
     clearAuthFields();
   }
 
+  const clearSession = useCallback(() => {
+    setIsLoggedIn(false);
+    setIsProfileMenuOpen(false);
+    setPageView("home");
+    setAuthMode(null);
+    setUserName("");
+    setUserEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setNewPassword("");
+    setResetEmail("");
+    setIsPasswordVisible(false);
+    setIsNewPasswordVisible(false);
+    setShowRegisterPrompt(false);
+  }, []);
+
+  const handleUnauthorized = useCallback(() => {
+    clearSession();
+    setAuthMode("login");
+    setAuthNotice("Oturumunuz sona erdi. Lütfen tekrar giriş yapın.");
+  }, [clearSession]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkSession() {
+      try {
+        const data = await apiRequest<AuthApiResponse>("/api/v1/me");
+
+        if (cancelled) {
+          return;
+        }
+
+        setUserName(data.ad_soyad ?? "Kullanıcı");
+        setUserEmail(data.email ?? "");
+        setIsLoggedIn(true);
+      } catch (requestError) {
+        if (cancelled) {
+          return;
+        }
+
+        if (requestError instanceof ApiRequestError && requestError.status === 404) {
+          return;
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSessionChecking(false);
+        }
+      }
+    }
+
+    checkSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -306,8 +408,11 @@ export default function Home() {
 
     try {
       if (authMode === "forgot") {
-        await postAuthRequest("/api/v1/forgot-password", {
-          email: resetEmail.trim().toLowerCase(),
+        await apiRequest("/api/v1/forgot-password", {
+          method: "POST",
+          body: {
+            email: resetEmail.trim().toLowerCase(),
+          },
         });
 
         setAuthNotice("Yeni şifreniz Gmail hesabınıza gönderildi.");
@@ -331,10 +436,13 @@ export default function Home() {
           return;
         }
 
-        const data = await postAuthRequest("/api/v1/register", {
-          ad_soyad: userName.trim(),
-          email: normalizedEmail,
-          sifre: password,
+        const data = await apiRequest<AuthApiResponse>("/api/v1/register", {
+          method: "POST",
+          body: {
+            ad_soyad: userName.trim(),
+            email: normalizedEmail,
+            sifre: password,
+          },
         });
 
         setIsLoggedIn(true);
@@ -350,9 +458,12 @@ export default function Home() {
         return;
       }
 
-      const data = await postAuthRequest("/api/v1/login", {
-        email: normalizedEmail,
-        sifre: password,
+      const data = await apiRequest<AuthApiResponse>("/api/v1/login", {
+        method: "POST",
+        body: {
+          email: normalizedEmail,
+          sifre: password,
+        },
       });
 
       setIsLoggedIn(true);
@@ -385,14 +496,17 @@ export default function Home() {
       setAuthStatus("idle");
     }
   }
-  function handleLogout() {
-    setIsLoggedIn(false);
+  async function handleLogout() {
     setIsProfileMenuOpen(false);
-    setPageView("home");
-    setAuthMode(null);
-    clearAuthFields();
+
+    try {
+      await apiRequest("/api/v1/logout", { method: "POST" });
+    } catch {
+      // Backend henüz hazır olmasa bile oturumu frontend tarafında güvenli şekilde kapat.
+    }
+
+    clearSession();
     setAuthNotice("");
-    setShowRegisterPrompt(false);
   }
 
   function goToRegisterFromPrompt() {
@@ -424,29 +538,16 @@ export default function Home() {
       return;
     }
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
     setStatus("loading");
     setError("");
     setResult(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/scan-url`, {
+      const data = await apiRequest<BackendResponse>("/api/v1/scan-url", {
         method: "POST",
-        credentials: "include",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: trimmedUrl }),
-        signal: controller.signal,
+        body: { url: trimmedUrl },
+        onUnauthorized: handleUnauthorized,
       });
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(response.status));
-      }
-
-      const data = (await response.json()) as BackendResponse;
       const nextResultView = getResultView(data);
 
       setResult(data);
@@ -462,6 +563,15 @@ export default function Home() {
       ]);
     } catch (requestError) {
       setStatus("error");
+
+      if (requestError instanceof ApiRequestError) {
+        if (requestError.status === 401 || requestError.status === 403) {
+          return;
+        }
+
+        setError(getErrorMessage(requestError.status));
+        return;
+      }
 
       if (requestError instanceof DOMException && requestError.name === "AbortError") {
         setError("Timeout: Sunucu 15 saniye içinde cevap vermedi. Lütfen daha sonra tekrar deneyin.");
@@ -481,8 +591,6 @@ export default function Home() {
       }
 
       setError("Ağ bağlantısı kurulamadı. Backend sunucusunun http://localhost:8000 adresinde çalıştığından emin olun.");
-    } finally {
-      window.clearTimeout(timeoutId);
     }
   }
 
@@ -564,7 +672,9 @@ export default function Home() {
             )}
           </button>
 
-          {isLoggedIn ? (
+          {isSessionChecking ? (
+            <span className="rounded-full border border-black/10 px-5 py-2 text-sm text-black/50">Oturum kontrol ediliyor...</span>
+          ) : isLoggedIn ? (
             <div className="relative">
               <button
                 type="button"
