@@ -6,3 +6,4 @@ venv312/
 *.py[cod]
 .pytest_cache/
 .venv/
+venv312/
