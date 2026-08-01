@@ -82,17 +82,17 @@ class SifreUnuttumRequest(BaseModel):
 
 # --- ENDPOINT'LER ---
 
-# Eksik olan root endpointi eklendi ve async yapıldı
+# Root endpointi veritabanı kullanmadığı için async kalabilir
 @app.get("/")
 async def read_root():
     return {"message": "Phishing Detection API is running"}
 
-# def -> async def olarak değiştirildi
+# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post(
     "/api/v1/scan-url",
     response_model=URLTaramaResponse,
 )
-async def scan_url(
+def scan_url(
     payload: URLSorgu,
     db: Session = Depends(database.get_db),
 ):
@@ -133,8 +133,9 @@ async def scan_url(
             detail=f"Veritabanı kayıt hatası: {str(error)}",
         ) from error
 
+# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/register")
-async def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db)):
+def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db)):
     existing_user = db.query(models.User).filter(models.User.email == payload.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Bu e-posta adresi ile zaten kayıt olunmuş.")
@@ -162,17 +163,18 @@ async def register_user(payload: KayitOlRequest, db: Session = Depends(database.
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Kayıt hatası: {str(e)}")
 
-# def -> async def olarak değiştirildi
+# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/login")
-async def login_user(payload: GirisYapRequest, db: Session = Depends(database.get_db)):
+def login_user(payload: GirisYapRequest, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.email == payload.email, models.User.sifre == payload.sifre).first()
     if not user:
         raise HTTPException(status_code=400, detail="E-posta veya şifre hatalı.")
     
     return {"status": "success", "message": "Giriş başarılı.", "ad_soyad": user.ad_soyad}
 
+# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/forgot-password")
-async def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database.get_db)):
+def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.email == payload.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Bu e-posta adresine ait kayıt bulunamadı.")
