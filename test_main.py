@@ -1,23 +1,20 @@
 import os
-
 import pytest
+import pytest_asyncio
+from httpx import AsyncClient, ASGITransport
 
 # 1. ADIM: TEST ORTAMI VERİTABANI TANIMLAMASI
 test_db_path = "./test.db"
 os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
 
-from fastapi.testclient import TestClient
-
 import database
 from main import app
-
 
 # 2. ADIM: TEST BİTTİĞİNDE test.db DOSYASINI OTOMATİK SİL
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_test_db():
     yield  # Testlerin normal şekilde çalışmasına izin ver
 
-    # Test veritabanı gerçek uygulama veritabanından ayrı tutulur.
     if os.path.exists(test_db_path):
         try:
             os.remove(test_db_path)
@@ -25,12 +22,17 @@ def cleanup_test_db():
             pass
 
 
-client = TestClient(app)
+# 3. ADIM: ASENKRON TEST İSTEMCİSİ (STRICT Moda Uygun Hale Getirildi)
+@pytest_asyncio.fixture
+async def async_client():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        yield client
 
 
-# --- MEVCUT TEMEL TEST (Korundu) ---
-def test_read_root():
-    response = client.get("/")
+# --- MEVCUT TEMEL TEST ---
+@pytest.mark.asyncio
+async def test_read_root(async_client):
+    response = await async_client.get("/")
     assert response.status_code in [200, 404]
 
 
@@ -39,11 +41,8 @@ def test_read_root():
 # =====================================================================
 
 # --- SENARYO 1: Mock Model ile Başarılı İstek (200 OK) ---
-def test_scan_url_success(mocker):
-    """
-    Endpoint sözleşmesini modelden bağımsız test edebilmek için
-    analiz sonucunu mock'lar.
-    """
+@pytest.mark.asyncio
+async def test_scan_url_success(mocker, async_client):
     sahte_ozellikler = {
         "url_uzunlugu": 19,
         "alan_adi_uzunlugu": 11,
@@ -69,7 +68,7 @@ def test_scan_url_success(mocker):
         return_value=sahte_analiz,
     )
 
-    response = client.post(
+    response = await async_client.post(
         "/api/v1/scan-url",
         json={"url": "https://example.com"},
     )
@@ -88,15 +87,9 @@ def test_scan_url_success(mocker):
 
 
 # --- SENARYO 2: Gerçek Model Entegrasyon / Smoke Testi ---
-def test_scan_url_real_model_smoke():
-    """
-    Mock kullanmadan gerçek model dosyalarını, özellik çıkarımını,
-    scaler dönüşümünü ve predict işlemini uçtan uca çalıştırır.
-
-    Bu testin amacı belirli bir risk yüzdesini sabitlemek değil,
-    model pipeline'ının gerçekten çalıştığını doğrulamaktır.
-    """
-    response = client.post(
+@pytest.mark.asyncio
+async def test_scan_url_real_model_smoke(async_client):
+    response = await async_client.post(
         "/api/v1/scan-url",
         json={"url": "https://www.google.com"},
     )
@@ -125,12 +118,9 @@ def test_scan_url_real_model_smoke():
 
 
 # --- SENARYO 3: Boşluklu / Geçersiz URL (422) ---
-def test_scan_url_invalid_url():
-    """
-    Geçersiz bir URL gönderildiğinde Pydantic doğrulamasının
-    devreye girip 422 dönmesini test eder.
-    """
-    response = client.post(
+@pytest.mark.asyncio
+async def test_scan_url_invalid_url(async_client):
+    response = await async_client.post(
         "/api/v1/scan-url",
         json={"url": "https://gecersiz url .com"},
     )
@@ -139,34 +129,25 @@ def test_scan_url_invalid_url():
 
 
 # --- SENARYO 4A: Model Analizi Hatası (500) ---
-def test_scan_url_analysis_error(mocker):
-    """
-    analyze_url fonksiyonu hata fırlattığında endpoint'in
-    500 Internal Server Error döndürdüğünü test eder.
-    """
+@pytest.mark.asyncio
+async def test_scan_url_analysis_error(mocker, async_client):
     mocker.patch(
         "main.analyze_url",
         side_effect=Exception("Model analiz motoru hatası!"),
     )
 
-    response = client.post(
+    response = await async_client.post(
         "/api/v1/scan-url",
         json={"url": "https://error-analysis.com"},
     )
 
     assert response.status_code == 500
-    assert (
-        "URL analizi tamamlanamadı"
-        in response.json()["detail"]
-    )
+    assert "URL analizi tamamlanamadı" in response.json()["detail"]
 
 
 # --- SENARYO 4B: Veritabanı Hatası ve Rollback ---
-def test_scan_url_db_error_and_rollback(mocker):
-    """
-    Veritabanı kaydı sırasında commit() hata verdiğinde rollback()
-    yapıldığını ve endpoint'in 500 döndürdüğünü test eder.
-    """
+@pytest.mark.asyncio
+async def test_scan_url_db_error_and_rollback(mocker, async_client):
     sahte_analiz = {
         "verdict": "dangerous",
         "riskScore": 95.0,
@@ -195,15 +176,12 @@ def test_scan_url_db_error_and_rollback(mocker):
         "sqlalchemy.orm.session.Session.rollback",
     )
 
-    response = client.post(
+    response = await async_client.post(
         "/api/v1/scan-url",
         json={"url": "https://db-error.com"},
     )
 
     assert response.status_code == 500
-    assert (
-        "Veritabanı kayıt hatası"
-        in response.json()["detail"]
-    )
+    assert "Veritabanı kayıt hatası" in response.json()["detail"]
     mock_commit.assert_called_once()
     mock_rollback.assert_called_once()
