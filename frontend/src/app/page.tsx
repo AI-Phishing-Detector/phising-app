@@ -60,6 +60,7 @@ async function postAuthRequest(endpoint: string, body: Record<string, string>) {
   try {
     const response = await fetch(`${API_BASE_URL}${endpoint}`, {
       method: "POST",
+      credentials: "include",
       headers: {
         "Content-Type": "application/json",
       },
@@ -70,10 +71,6 @@ async function postAuthRequest(endpoint: string, body: Record<string, string>) {
     const data = (await response.json().catch(() => ({}))) as AuthApiResponse;
 
     if (!response.ok) {
-      if (response.status === 404 && endpoint === "/api/v1/change-password") {
-        throw new Error("Şifre değiştirme servisi backend tarafında henüz hazır değil.");
-      }
-
       throw new Error(getApiErrorText(data, `Hata ${response.status}: İşlem tamamlanamadı.`));
     }
 
@@ -297,6 +294,12 @@ export default function Home() {
 
     const normalizedEmail = userEmail.trim().toLowerCase();
 
+    if (authMode === "profile") {
+      setShowRegisterPrompt(false);
+      setAuthNotice("Şifre değiştirme servisi backend tarafında henüz hazır değil. Backend entegrasyonu bekleniyor.");
+      return;
+    }
+
     setAuthStatus("loading");
     setAuthNotice("");
     setShowRegisterPrompt(false);
@@ -309,27 +312,6 @@ export default function Home() {
 
         setAuthNotice("Yeni şifreniz Gmail hesabınıza gönderildi.");
         setResetEmail("");
-        return;
-      }
-
-      if (authMode === "profile") {
-        if (!newPassword) {
-          setAuthNotice("Lütfen yeni şifrenizi yazın.");
-          return;
-        }
-
-        if (getPasswordStrength(newPassword).score < 50) {
-          setAuthNotice("Yeni şifre güvenliği düşük. En az 8 karakter, büyük harf, sayı veya özel karakter kullanın.");
-          return;
-        }
-
-        await postAuthRequest("/api/v1/change-password", {
-          email: userEmail,
-          yeni_sifre: newPassword,
-        });
-
-        setNewPassword("");
-        setAuthNotice("Şifreniz başarıyla güncellendi.");
         return;
       }
 
@@ -387,11 +369,6 @@ export default function Home() {
       if (requestError instanceof Error) {
         const message = requestError.message;
         const lowerMessage = message.toLowerCase();
-
-        if (authMode === "profile" && message.includes("404")) {
-          setAuthNotice("Şifre değiştirme servisi backend tarafında henüz hazır değil.");
-          return;
-        }
 
         if (authMode === "login" && (lowerMessage.includes("kayıt bulunamadı") || lowerMessage.includes("bulunamadı"))) {
           setShowRegisterPrompt(true);
@@ -457,6 +434,7 @@ export default function Home() {
     try {
       const response = await fetch(`${API_BASE_URL}/api/v1/scan-url`, {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
         },
@@ -827,13 +805,16 @@ export default function Home() {
                         <p className={`text-xs ${newPasswordStrength.text}`}>{newPasswordStrength.label}</p>
                       </>
                     )}
+                    <p className="rounded-2xl border border-black/10 bg-black/[0.04] px-4 py-3 text-xs leading-5 text-black/60">
+                      Şifre değiştirme servisi backend tarafında henüz hazır değil. Backend entegrasyonu bekleniyor.
+                    </p>
                     </div>
                   </div>
                 )}
 
                 <button
                   type="submit"
-                  disabled={authStatus === "loading"}
+                  disabled={authStatus === "loading" || authMode === "profile"}
                   className="w-full rounded-2xl bg-black px-5 py-4 font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:bg-black/50"
                 >
                   {authStatus === "loading"
@@ -841,7 +822,7 @@ export default function Home() {
                     : authMode === "forgot"
                       ? "Gmail'e kod gönder"
                       : authMode === "profile"
-                        ? "Şifreyi değiştir"
+                        ? "Backend entegrasyonu bekleniyor"
                         : authMode === "register"
                           ? "Kayıt Ol"
                           : "Giriş Yap"}
