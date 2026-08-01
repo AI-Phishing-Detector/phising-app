@@ -94,6 +94,7 @@ def clean_url(url: str) -> str:
     url = url.strip()
     if not url.lower().startswith(('http://', 'https://')):
         url = 'http://' + url
+    url = url.replace("://www.", "://").replace("://WWW.", "://")
     return url
 
 def max_consecutive_chars(text: str) -> int:
@@ -361,8 +362,8 @@ def process_csv(input_filename: str, output_filename: str):
 # =====================================================================
 
 if __name__ == "__main__":
-    input_file = "raw_urls.csv"  # Buraya kendi dosya ismini yazabilirsin
-    output_file = "features_extracted.csv"
+    input_file = "01_clean_raw_urls.csv"
+    output_file = "02_features_extracted.csv"
     
     # WHOIS sorguları tamamen kaldırıldı
     process_csv(input_file, output_file)
