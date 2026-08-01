@@ -43,18 +43,32 @@ def load_artifact(path: Path) -> Any:
         ) from error
 
 
-model = load_artifact(MODEL_PATH)
-scaler = load_artifact(SCALER_PATH)
-expected_features = list(load_artifact(FEATURES_PATH))
+# --- DÜZELTİLEN KISIM BAŞLANGICI ---
+# Modelleri en başta yüklemek yerine, boş tanımlıyoruz (Lazy Loading)
+model = None
+scaler = None
+expected_features = None
 
-if not expected_features:
-    raise RuntimeError("Model özellik listesi boş olamaz.")
+def initialize_models():
+    """Modelleri sadece ilk ihtiyaç anında belleğe alır."""
+    global model, scaler, expected_features
+    if model is None:
+        model = load_artifact(MODEL_PATH)
+        scaler = load_artifact(SCALER_PATH)
+        expected_features = list(load_artifact(FEATURES_PATH))
+
+        if not expected_features:
+            raise RuntimeError("Model özellik listesi boş olamaz.")
+# --- DÜZELTİLEN KISIM BİTİŞİ ---
 
 
 def analyze_url(url: str) -> dict[str, Any]:
     """
     URL özelliklerini çıkarır ve eğitilmiş model ile risk analizi yapar.
     """
+    # Endpoint çalıştığında modeller henüz yüklenmemişse yükle
+    initialize_models()
+
     raw_features = extract_features(url)
     model_features = dict(raw_features)
 
