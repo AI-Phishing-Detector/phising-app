@@ -47,10 +47,6 @@ class URLSorgu(BaseModel):
 
 
 class URLAnalizDetayi(BaseModel):
-    """
-    Modelin ürettiği analiz ayrıntılarının API sözleşmesini tanımlar.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     phishingProbability: float = Field(ge=0, le=100)
@@ -59,11 +55,6 @@ class URLAnalizDetayi(BaseModel):
 
 
 class URLTaramaResponse(BaseModel):
-    """
-    Mobil uygulamanın tarama endpointinden beklediği
-    zorunlu yanıt alanlarını tanımlar.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     id: int
@@ -91,11 +82,17 @@ class SifreUnuttumRequest(BaseModel):
 
 # --- ENDPOINT'LER ---
 
+# Eksik olan root endpointi eklendi ve async yapıldı
+@app.get("/")
+async def read_root():
+    return {"message": "Phishing Detection API is running"}
+
+# def -> async def olarak değiştirildi
 @app.post(
     "/api/v1/scan-url",
     response_model=URLTaramaResponse,
 )
-def scan_url(
+async def scan_url(
     payload: URLSorgu,
     db: Session = Depends(database.get_db),
 ):
@@ -152,7 +149,6 @@ async def register_user(payload: KayitOlRequest, db: Session = Depends(database.
         db.commit()
         db.refresh(new_user)
 
-        # --- TEST / KONSOL MODU (Kayıt Maili) ---
         print("\n" + "="*50)
         print(f"📧 [TEST MAİLİ - SİMÜLASYON]")
         print(f"Kime (Alıcı) : {payload.email}")
@@ -166,8 +162,9 @@ async def register_user(payload: KayitOlRequest, db: Session = Depends(database.
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Kayıt hatası: {str(e)}")
 
+# def -> async def olarak değiştirildi
 @app.post("/api/v1/login")
-def login_user(payload: GirisYapRequest, db: Session = Depends(database.get_db)):
+async def login_user(payload: GirisYapRequest, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.email == payload.email, models.User.sifre == payload.sifre).first()
     if not user:
         raise HTTPException(status_code=400, detail="E-posta veya şifre hatalı.")
@@ -180,12 +177,10 @@ async def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(da
     if not user:
         raise HTTPException(status_code=404, detail="Bu e-posta adresine ait kayıt bulunamadı.")
     
-    # Yeni geçici şifre üretme
     yeni_sifre = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
     user.sifre = yeni_sifre
     db.commit()
 
-    # --- TEST / KONSOL MODU (Şifre Sıfırlama Maili) ---
     print("\n" + "="*50)
     print(f"🔑 [TEST ŞİFRE MAİLİ - SİMÜLASYON]")
     print(f"Kime (Alıcı)       : {payload.email}")
