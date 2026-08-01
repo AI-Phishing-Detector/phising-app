@@ -20,7 +20,7 @@ import { SecurityNote } from "../components/home/SecurityNote";
 import { colors } from "../constants/theme";
 import { useAuth } from "../context/AuthContext";
 import { useScanHistory } from "../context/ScanHistoryContext";
-import { scanUrl } from "../services/scanService";
+import { scanUrl, UserFacingError } from "../services/scanService";
 import type { ScanResult } from "../types/scan";
 import {
   triggerErrorHaptic,
@@ -179,7 +179,7 @@ export default function Index() {
       }
     } catch (error) {
       const errorMessage =
-        error instanceof Error
+        error instanceof UserFacingError
           ? error.message
           : "Tarama sırasında bir sorun oluştu. Lütfen tekrar deneyin.";
 

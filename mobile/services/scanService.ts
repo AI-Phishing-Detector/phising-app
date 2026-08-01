@@ -7,7 +7,7 @@ const REQUEST_TIMEOUT_MS = 15_000;
  * Yalnızca uygulama tarafından güvenli hâle getirilen mesajların
  * kullanıcı arayüzüne ulaşmasını sağlar.
  */
-class UserFacingError extends Error {
+export class UserFacingError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "UserFacingError";
