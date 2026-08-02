@@ -87,12 +87,11 @@ class SifreUnuttumRequest(BaseModel):
 async def read_root():
     return {"message": "Phishing Detection API is running"}
 
-# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post(
     "/api/v1/scan-url",
     response_model=URLTaramaResponse,
 )
-def scan_url(
+async def scan_url(
     payload: URLSorgu,
     db: Session = Depends(database.get_db),
 ):

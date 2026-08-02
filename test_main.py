@@ -1,28 +1,54 @@
 import os
+import tempfile
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
-# 1. ADIM: TEST ORTAMI VERİTABANI TANIMLAMASI
-test_db_path = "./test.db"
-os.environ["DATABASE_URL"] = f"sqlite:///{test_db_path}"
+# Uygulama modülleri import edilirken zorunlu olan ayar. Dosya yolu vermeyerek
+# testlerin fiziksel bir SQLite veritabanı oluşturmasını engelliyoruz.
+os.environ["DATABASE_URL"] = "sqlite://"
+test_cache_dir = tempfile.TemporaryDirectory(prefix="phishing-test-tldextract-")
+os.environ["TLDEXTRACT_CACHE"] = test_cache_dir.name
 
 import database
+import models
 from main import app
 
-# 2. ADIM: TEST BİTTİĞİNDE test.db DOSYASINI OTOMATİK SİL
+test_engine = create_engine(
+    "sqlite://",
+    connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
+)
+TestingSessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=test_engine,
+)
+
+
+async def override_get_db():
+    """Her istek için paylaşılan bellek içi motora bağlı ayrı bir oturum aç."""
+    db = TestingSessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
 @pytest.fixture(scope="session", autouse=True)
-def cleanup_test_db():
-    yield  # Testlerin normal şekilde çalışmasına izin ver
+def test_database():
+    models.Base.metadata.create_all(bind=test_engine)
+    app.dependency_overrides[database.get_db] = override_get_db
+    yield
+    app.dependency_overrides.pop(database.get_db, None)
+    models.Base.metadata.drop_all(bind=test_engine)
+    test_engine.dispose()
+    test_cache_dir.cleanup()
 
-    if os.path.exists(test_db_path):
-        try:
-            os.remove(test_db_path)
-        except Exception:
-            pass
 
-
-# 3. ADIM: ASENKRON TEST İSTEMCİSİ (STRICT Moda Uygun Hale Getirildi)
 @pytest_asyncio.fixture
 async def async_client():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
