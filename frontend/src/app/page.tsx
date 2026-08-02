@@ -46,13 +46,6 @@ type ResultView = {
   description: string;
 };
 
-type ScanHistoryItem = {
-  url: string;
-  variant: ResultVariant;
-  label: string;
-  date: string;
-};
-
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const REQUEST_TIMEOUT_MS = 15000;
 const infoTopics: InfoTopic[] = ["phishing", "protection", "workflow"];
@@ -180,11 +173,7 @@ const infoContent: Record<InfoTopic, { title: string; text: string; items: strin
     title: "Sistem nasıl çalışır?",
     text:
       "Kullanıcı URL adresini web arayüzüne girer. Frontend bu adresi backend API'ye gönderir. Backend URL özelliklerini çıkarır ve yapay zeka modeli hazır olduğunda sonucu kullanıcıya döndürür.",
-    items: [
-      "URL frontend üzerinden alınır.",
-      "Backend tarafında analiz edilir.",
-      "Sonuç ekranda kullanıcıya gösterilir.",
-    ],
+    items: ["URL frontend üzerinden alınır.", "Backend tarafında analiz edilir.", "Sonuç ekranda kullanıcıya gösterilir."],
   },
 };
 
@@ -552,15 +541,6 @@ export default function Home() {
 
       setResult(data);
       setStatus("success");
-      setScanHistory((history) => [
-        {
-          url: data.url ?? trimmedUrl,
-          variant: nextResultView.variant,
-          label: nextResultView.title,
-          date: new Date().toLocaleDateString("tr-TR"),
-        },
-        ...history,
-      ]);
     } catch (requestError) {
       setStatus("error");
 
@@ -595,27 +575,8 @@ export default function Home() {
   }
 
   const selectedInfo = infoContent[activeTopic];
-  const passwordStrength = getPasswordStrength(password);
-  const newPasswordStrength = getPasswordStrength(newPassword);
   const resultView = useMemo(() => (result ? getResultView(result) : null), [result]);
   const resultClasses = resultView ? getResultClasses(resultView.variant) : null;
-
-  const historyStats = useMemo(() => {
-    const total = scanHistory.length;
-    const danger = scanHistory.filter((item) => item.variant === "danger").length;
-    const safe = scanHistory.filter((item) => item.variant === "safe").length;
-    const neutral = scanHistory.filter((item) => item.variant === "neutral").length;
-    const max = Math.max(total, danger, safe, neutral, 1);
-
-    return { total, danger, safe, neutral, max };
-  }, [scanHistory]);
-
-  const dashboardBars = [
-    { label: "Toplam", value: historyStats.total, className: "bg-black" },
-    { label: "Zararlı", value: historyStats.danger, className: "bg-red-600" },
-    { label: "Güvenli", value: historyStats.safe, className: "bg-green-600" },
-    { label: "Beklemede", value: historyStats.neutral, className: "bg-zinc-500" },
-  ];
 
   return (
     <main className="min-h-screen bg-white text-black lg:flex">
@@ -978,154 +939,56 @@ export default function Home() {
                 </p>
               )}
             </div>
-          </section>
-        ) : pageView === "history" ? (
-          <section className="flex-1 py-10">
-            <div className="mb-8">
-              <p className="text-xs uppercase tracking-[0.3em] text-black/40">Kişisel dashboard</p>
-              <h2 className="mt-3 text-4xl font-semibold">Geçmiş taramalarım</h2>
-              <p className="mt-3 max-w-2xl text-sm leading-6 text-black/60">
-                Bu alan giriş yapan kullanıcının geçmiş URL analizlerini ve zararlı/güvenli dağılımını gösterir.
-              </p>
-            </div>
+          </div>
 
-            <div className="grid gap-5 lg:grid-cols-[0.9fr_1.1fr]">
-              <section className="rounded-[2rem] border border-black/10 bg-white p-6 shadow-sm">
-                <div className="flex items-start justify-between gap-4">
-                  <div>
-                    <h3 className="text-xl font-semibold">Tarama grafiği</h3>
-                    <p className="mt-2 text-sm text-black/55">URL tarama sonuçlarının sütun grafiği görünümü.</p>
-                  </div>
-                  <span className="rounded-full bg-black px-3 py-1 text-xs font-semibold text-white">{historyStats.total} toplam</span>
-                </div>
-
-                <div className="mt-7 rounded-3xl border border-black/10 bg-black/[0.02] p-5">
-                  <div className="flex h-56 items-end gap-4 border-b border-l border-black/15 px-3 pb-3">
-                    {dashboardBars.map((bar) => {
-                      const barHeight = bar.value === 0 ? 8 : Math.max((bar.value / historyStats.max) * 100, 12);
-
-                      return (
-                        <div key={bar.label} className="flex h-full flex-1 flex-col items-center justify-end gap-2">
-                          <span className="text-sm font-semibold text-black">{bar.value}</span>
-                          <div className="flex h-40 w-full items-end justify-center">
-                            <div
-                              className={`w-full max-w-14 rounded-t-2xl ${bar.className} shadow-sm transition-all`}
-                              style={{ height: `${barHeight}%` }}
-                              aria-label={`${bar.label}: ${bar.value}`}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-3 grid grid-cols-4 gap-4 px-3 text-center text-xs font-medium text-black/60">
-                    {dashboardBars.map((bar) => (
-                      <span key={bar.label}>{bar.label}</span>
-                    ))}
-                  </div>
-                </div>
-              </section>
-
-              <section className="rounded-[2rem] border border-black/10 bg-white p-6 shadow-sm">
-                <h3 className="text-xl font-semibold">Son taramalar</h3>
-                {scanHistory.length ? (
-                  <div className="mt-5 space-y-3">
-                    {scanHistory.map((item) => (
-                      <article key={`${item.url}-${item.date}`} className="rounded-2xl border border-black/10 p-4">
-                        <div className="flex items-center justify-between gap-4">
-                          <p className="break-all text-sm font-medium">{item.url}</p>
-                          <span
-                            className={`shrink-0 rounded-full px-3 py-1 text-xs font-semibold text-white ${
-                              item.variant === "danger" ? "bg-red-600" : item.variant === "safe" ? "bg-green-600" : "bg-black"
-                            }`}
-                          >
-                            {item.label}
-                          </span>
-                        </div>
-                        <p className="mt-2 text-xs text-black/50">{item.date}</p>
-                      </article>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-5 rounded-2xl bg-black/[0.04] p-4 text-sm text-black/60">
-                    Henüz kayıtlı tarama yok. Ana ekrandan URL taradığınızda sonuçlar burada listelenecek.
-                  </p>
-                )}
-              </section>
-            </div>
-          </section>
-        ) : (
-          <div className="grid flex-1 gap-8 py-10 xl:grid-cols-[1fr_1fr] xl:items-center">
-            <div>
-              <p className="mb-4 inline-flex rounded-full border border-black/15 px-4 py-2 text-sm text-black/70">
-                Oltalama bağlantılarını erken fark etmek için hızlı web arayüzü
-              </p>
-              <h2 className="max-w-3xl text-5xl font-semibold tracking-tight md:text-7xl">Lütfen linki yapıştırın.</h2>
-              <div className="mt-8 max-w-xl rounded-[2rem] border border-black/10 bg-white p-3 shadow-sm">
-                <Image
-                  src="/phishing-illustration.svg"
-                  alt="Phishing saldırılarına karşı güvenli bağlantı analizi illüstrasyonu"
-                  width={720}
-                  height={420}
-                  className="h-auto w-full rounded-[1.5rem]"
-                  priority
-                />
-              </div>
-            </div>
-
-            <div id="scan" className="w-full max-w-[620px] justify-self-start rounded-[2rem] border border-black/10 bg-black p-3 shadow-2xl shadow-black/15 xl:-ml-8">
-              <div className="rounded-[1.5rem] bg-white p-6">
-                <div className="mb-6 flex items-center justify-between">
+          <div id="scan" className="w-full max-w-[620px] justify-self-start rounded-[2rem] border border-black/10 bg-black p-3 shadow-2xl shadow-black/15 xl:-ml-8">
+            <div className="rounded-[1.5rem] bg-white p-6">
+              <div className="mb-8 flex items-start justify-between gap-4">
+                <div>
                   <h3 className="text-2xl font-semibold">URL Analizi</h3>
-                  <span className="rounded-full border border-black/15 px-3 py-1 text-xs font-medium">API</span>
+                  <p className="mt-2 text-sm text-black/55">Linki girin ve backend sonucunu görüntüleyin.</p>
                 </div>
+                <span className="rounded-full border border-black/10 px-3 py-1 text-xs font-medium text-black/70">API</span>
+              </div>
 
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  <label className="block text-sm font-medium" htmlFor="url">
-                    Taranacak URL
-                  </label>
-                  <input
-                    id="url"
-                    type="url"
-                    required
-                    value={url}
-                    onChange={(event) => setUrl(event.target.value)}
-                    placeholder="https://example.com/login"
-                    aria-invalid={status === "error"}
-                    aria-describedby={status === "error" ? "scan-error" : undefined}
-                    className="w-full rounded-2xl border border-black/15 px-4 py-4 text-base outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
-                  />
-                  <button
-                    type="submit"
-                    disabled={status === "loading"}
-                    className="w-full rounded-2xl bg-black px-5 py-4 font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:bg-black/50"
-                  >
-                    {status === "loading" ? "Taranıyor..." : "Bağlantıyı Tara"}
-                  </button>
-                </form>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <label className="block text-sm font-medium" htmlFor="url">
+                  Taranacak URL
+                </label>
+                <input
+                  id="url"
+                  type="url"
+                  required
+                  value={url}
+                  onChange={(event) => setUrl(event.target.value)}
+                  placeholder="https://example.com/login"
+                  aria-invalid={status === "error"}
+                  aria-describedby={status === "error" ? "scan-error" : undefined}
+                  className="w-full rounded-2xl border border-black/15 px-4 py-4 text-base outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
+                />
 
+                <button type="submit" disabled={status === "loading"} className="w-full rounded-2xl bg-black px-5 py-4 font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:bg-black/45">
+                  {status === "loading" ? "Taranıyor..." : "Bağlantıyı Tara"}
+                </button>
+              </form>
+
+              <div aria-live="polite" className="mt-6">
                 {status === "error" && (
-                  <section id="scan-error" aria-live="assertive" className="mt-6 rounded-3xl border border-red-200 bg-red-50 p-5">
-                    <p className="text-sm text-red-700">Bağlantı hatası</p>
-                    <h4 className="mt-1 text-xl font-semibold text-red-950">Sonuç alınamadı</h4>
-                    <p className="mt-3 text-sm leading-6 text-red-800">{error}</p>
+                  <section id="scan-error" className="rounded-2xl border border-red-200 bg-red-50 p-4 text-red-800">
+                    <p className="font-semibold">Sonuç alınamadı</p>
+                    <p className="mt-2 text-sm leading-6">{error}</p>
                   </section>
                 )}
 
                 {status === "success" && result && resultView && resultClasses && (
-                  <section aria-live="polite" className={`mt-6 rounded-3xl border p-5 ${resultClasses.section}`}>
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <p className={`text-sm ${resultClasses.subText}`}>Analiz sonucu</p>
-                        <h4 className={`mt-1 text-2xl font-semibold ${resultClasses.text}`}>{resultView.title}</h4>
-                      </div>
-                      <div className={`rounded-full px-4 py-2 text-sm font-bold ${resultClasses.badge}`}>{resultView.badge}</div>
+                  <section className={`rounded-2xl border p-4 ${resultClasses.section}`}>
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <h4 className={`text-lg font-semibold ${resultClasses.text}`}>{resultView.title}</h4>
+                      <span className={`rounded-full px-3 py-1 text-xs font-semibold ${resultClasses.badge}`}>{resultView.badge}</span>
                     </div>
+                    <p className={`mt-3 text-sm leading-6 ${resultClasses.subText}`}>{resultView.description}</p>
 
-                    <p className={`mt-4 text-sm leading-6 ${resultClasses.subText}`}>{resultView.description}</p>
-
-                    <div className="mt-5 rounded-2xl bg-white/70 px-4 py-3 text-sm">
+                    <div className="mt-4 rounded-2xl border border-black/10 bg-white/70 p-4 text-sm">
                       <p className="font-medium">Taranan URL</p>
                       <p className="mt-1 break-all text-black/65">{result.url ?? url}</p>
                     </div>
@@ -1143,17 +1006,8 @@ export default function Home() {
               </div>
             </div>
           </div>
-        )}
+        </div>
       </section>
     </main>
   );
 }
-
-
-
-
-
-
-
-
-
