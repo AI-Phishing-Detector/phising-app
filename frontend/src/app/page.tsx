@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import type { FormEvent } from "react";
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 type BackendResponse = {
   url?: string;
@@ -19,6 +19,25 @@ type BackendResponse = {
 type ScanState = "idle" | "loading" | "success" | "error";
 type ResultVariant = "safe" | "danger" | "neutral";
 type InfoTopic = "phishing" | "protection" | "workflow";
+type AuthMode = "login" | "register" | "forgot" | "profile" | null;
+type PageView = "home" | "history";
+type AuthApiResponse = {
+  status?: string;
+  message?: string;
+  detail?: string | { msg?: string }[];
+  ad_soyad?: string;
+  email?: string;
+};
+
+class ApiRequestError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "ApiRequestError";
+    this.status = status;
+  }
+}
 
 type ResultView = {
   variant: ResultVariant;
@@ -30,6 +49,104 @@ type ResultView = {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 const REQUEST_TIMEOUT_MS = 15000;
 const infoTopics: InfoTopic[] = ["phishing", "protection", "workflow"];
+
+function getApiErrorText(response: AuthApiResponse, fallback: string) {
+  if (typeof response.detail === "string") return response.detail;
+  if (Array.isArray(response.detail) && response.detail[0]?.msg) return response.detail[0].msg;
+
+  return response.message ?? fallback;
+}
+
+type ApiRequestOptions = {
+  method?: string;
+  body?: Record<string, string>;
+  onUnauthorized?: () => void;
+};
+
+async function apiRequest<T extends AuthApiResponse>(
+  endpoint: string,
+  options: ApiRequestOptions = {},
+): Promise<T> {
+  const { method = "GET", body, onUnauthorized } = options;
+  const controller = new AbortController();
+  const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(`${API_BASE_URL}${endpoint}`, {
+      method,
+      credentials: "include",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    });
+
+    const data = (await response.json().catch(() => ({}))) as T;
+
+    if (response.status === 401 || response.status === 403) {
+      if (onUnauthorized) {
+        onUnauthorized();
+        throw new ApiRequestError(
+          response.status,
+          response.status === 401
+            ? "Oturumunuz sona erdi. Lütfen tekrar giriş yapın."
+            : "Bu işlem için yetkiniz bulunmuyor. Lütfen tekrar giriş yapın.",
+        );
+      }
+
+      throw new ApiRequestError(
+        response.status,
+        getApiErrorText(data, `Hata ${response.status}: İşlem tamamlanamadı.`),
+      );
+    }
+
+    if (!response.ok) {
+      throw new ApiRequestError(
+        response.status,
+        getApiErrorText(data, `Hata ${response.status}: İşlem tamamlanamadı.`),
+      );
+    }
+
+    return data;
+  } catch (requestError) {
+    if (requestError instanceof ApiRequestError) {
+      throw requestError;
+    }
+
+    if (requestError instanceof DOMException && requestError.name === "AbortError") {
+      throw new Error("Backend 15 saniye içinde cevap vermedi. Lütfen daha sonra tekrar deneyin.");
+    }
+
+    if (requestError instanceof TypeError) {
+      throw new Error(
+        "Backend sunucusuna ulaşılamadı. Lütfen FastAPI servisinin http://localhost:8000 adresinde açık olduğundan emin olun.",
+      );
+    }
+
+    throw requestError;
+  } finally {
+    window.clearTimeout(timeoutId);
+  }
+}
+
+function getPasswordStrength(password: string) {
+  let score = 0;
+
+  if (password.length >= 8) score += 25;
+  if (/[A-ZÇĞİÖŞÜ]/.test(password)) score += 25;
+  if (/[0-9]/.test(password)) score += 25;
+  if (/[^A-Za-zÇĞİÖŞÜçğıöşü0-9]/.test(password)) score += 25;
+
+  if (score >= 75) {
+    return { score, label: "Güçlü şifre", bar: "bg-green-500", text: "text-green-700" };
+  }
+
+  if (score >= 50) {
+    return { score, label: "Orta güvenlik", bar: "bg-yellow-500", text: "text-yellow-700" };
+  }
+
+  return { score, label: "Zayıf şifre", bar: "bg-red-500", text: "text-red-700" };
+}
+
 
 const infoContent: Record<InfoTopic, { title: string; text: string; items: string[] }> = {
   phishing: {
@@ -127,7 +244,6 @@ function getResultView(result: BackendResponse): ResultView {
       "Backend URL özelliklerini çıkardı. Yapay zeka sonucu geldiğinde güvenli veya zararlı durumu burada gösterilecek.",
   };
 }
-
 function getResultClasses(variant: ResultVariant) {
   if (variant === "danger") {
     return {
@@ -161,6 +277,243 @@ export default function Home() {
   const [result, setResult] = useState<BackendResponse | null>(null);
   const [error, setError] = useState("");
   const [activeTopic, setActiveTopic] = useState<InfoTopic>("phishing");
+  const [authMode, setAuthMode] = useState<AuthMode>(null);
+  const [pageView, setPageView] = useState<PageView>("home");
+  const [userName, setUserName] = useState("");
+  const [userEmail, setUserEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [resetEmail, setResetEmail] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [authStatus, setAuthStatus] = useState<ScanState>("idle");
+  const [showRegisterPrompt, setShowRegisterPrompt] = useState(false);
+  const [isPasswordVisible, setIsPasswordVisible] = useState(false);
+  const [isNewPasswordVisible, setIsNewPasswordVisible] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isSessionChecking, setIsSessionChecking] = useState(true);
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
+  const [scanHistory, setScanHistory] = useState<ScanHistoryItem[]>([]);
+
+  function clearAuthFields() {
+    setUserName("");
+    setUserEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setNewPassword("");
+    setResetEmail("");
+    setIsPasswordVisible(false);
+    setIsNewPasswordVisible(false);
+  }
+
+  function openAuth(mode: Exclude<AuthMode, null>) {
+    setAuthMode(mode);
+    setPageView("home");
+    setAuthNotice("");
+    setShowRegisterPrompt(false);
+    setIsProfileMenuOpen(false);
+
+    if (mode === "profile") {
+      setNewPassword("");
+      setIsNewPasswordVisible(false);
+      return;
+    }
+
+    clearAuthFields();
+  }
+
+  const clearSession = useCallback(() => {
+    setIsLoggedIn(false);
+    setIsProfileMenuOpen(false);
+    setPageView("home");
+    setAuthMode(null);
+    setUserName("");
+    setUserEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setNewPassword("");
+    setResetEmail("");
+    setIsPasswordVisible(false);
+    setIsNewPasswordVisible(false);
+    setShowRegisterPrompt(false);
+  }, []);
+
+  const handleUnauthorized = useCallback(() => {
+    clearSession();
+    setAuthMode("login");
+    setAuthNotice("Oturumunuz sona erdi. Lütfen tekrar giriş yapın.");
+  }, [clearSession]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function checkSession() {
+      try {
+        const data = await apiRequest<AuthApiResponse>("/api/v1/me");
+
+        if (cancelled) {
+          return;
+        }
+
+        setUserName(data.ad_soyad ?? "Kullanıcı");
+        setUserEmail(data.email ?? "");
+        setIsLoggedIn(true);
+      } catch (requestError) {
+        if (cancelled) {
+          return;
+        }
+
+        if (requestError instanceof ApiRequestError && requestError.status === 404) {
+          return;
+        }
+      } finally {
+        if (!cancelled) {
+          setIsSessionChecking(false);
+        }
+      }
+    }
+
+    checkSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function handleAuthSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    const normalizedEmail = userEmail.trim().toLowerCase();
+
+    if (authMode === "profile") {
+      setShowRegisterPrompt(false);
+      setAuthNotice("Şifre değiştirme servisi backend tarafında henüz hazır değil. Backend entegrasyonu bekleniyor.");
+      return;
+    }
+
+    setAuthStatus("loading");
+    setAuthNotice("");
+    setShowRegisterPrompt(false);
+
+    try {
+      if (authMode === "forgot") {
+        await apiRequest("/api/v1/forgot-password", {
+          method: "POST",
+          body: {
+            email: resetEmail.trim().toLowerCase(),
+          },
+        });
+
+        setAuthNotice("Yeni şifreniz Gmail hesabınıza gönderildi.");
+        setResetEmail("");
+        return;
+      }
+
+      if (authMode === "register") {
+        if (!userName.trim()) {
+          setAuthNotice("Lütfen ad soyad bilginizi yazın.");
+          return;
+        }
+
+        if (password !== confirmPassword) {
+          setAuthNotice("Şifreler eşleşmiyor. Lütfen şifrenizi tekrar kontrol edin.");
+          return;
+        }
+
+        if (getPasswordStrength(password).score < 50) {
+          setAuthNotice("Şifre güvenliği düşük. En az 8 karakter, büyük harf, sayı veya özel karakter kullanın.");
+          return;
+        }
+
+        const data = await apiRequest<AuthApiResponse>("/api/v1/register", {
+          method: "POST",
+          body: {
+            ad_soyad: userName.trim(),
+            email: normalizedEmail,
+            sifre: password,
+          },
+        });
+
+        setIsLoggedIn(true);
+        setUserEmail(normalizedEmail);
+        setUserName(userName.trim());
+        setAuthMode(null);
+        setPageView("home");
+        setPassword("");
+        setConfirmPassword("");
+        setNewPassword("");
+        setResetEmail("");
+        setAuthNotice(data.message ?? "Kayıt başarılı.");
+        return;
+      }
+
+      const data = await apiRequest<AuthApiResponse>("/api/v1/login", {
+        method: "POST",
+        body: {
+          email: normalizedEmail,
+          sifre: password,
+        },
+      });
+
+      setIsLoggedIn(true);
+      setUserName(data.ad_soyad ?? "Kullanıcı");
+      setUserEmail(normalizedEmail);
+      setAuthMode(null);
+      setPageView("home");
+      setPassword("");
+      setConfirmPassword("");
+      setNewPassword("");
+      setResetEmail("");
+      setAuthNotice("");
+    } catch (requestError) {
+      if (requestError instanceof Error) {
+        const message = requestError.message;
+        const lowerMessage = message.toLowerCase();
+
+        if (authMode === "login" && (lowerMessage.includes("kayıt bulunamadı") || lowerMessage.includes("bulunamadı"))) {
+          setShowRegisterPrompt(true);
+          setAuthNotice("");
+          return;
+        }
+
+        setAuthNotice(message);
+        return;
+      }
+
+      setAuthNotice("İşlem tamamlanamadı. Lütfen tekrar deneyin.");
+    } finally {
+      setAuthStatus("idle");
+    }
+  }
+  async function handleLogout() {
+    setIsProfileMenuOpen(false);
+
+    try {
+      await apiRequest("/api/v1/logout", { method: "POST" });
+    } catch {
+      // Backend henüz hazır olmasa bile oturumu frontend tarafında güvenli şekilde kapat.
+    }
+
+    clearSession();
+    setAuthNotice("");
+  }
+
+  function goToRegisterFromPrompt() {
+    setShowRegisterPrompt(false);
+    setAuthNotice("");
+    setUserName("");
+    setUserEmail("");
+    setPassword("");
+    setConfirmPassword("");
+    setResetEmail("");
+    setAuthMode("register");
+  }
+
+  function closeRegisterPrompt() {
+    setShowRegisterPrompt(false);
+    setAuthNotice("");
+    setPassword("");
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -174,33 +527,31 @@ export default function Home() {
       return;
     }
 
-    const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-
     setStatus("loading");
     setError("");
     setResult(null);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/v1/scan-url`, {
+      const data = await apiRequest<BackendResponse>("/api/v1/scan-url", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: trimmedUrl }),
-        signal: controller.signal,
+        body: { url: trimmedUrl },
+        onUnauthorized: handleUnauthorized,
       });
-
-      if (!response.ok) {
-        throw new Error(getErrorMessage(response.status));
-      }
-
-      const data = (await response.json()) as BackendResponse;
+      const nextResultView = getResultView(data);
 
       setResult(data);
       setStatus("success");
     } catch (requestError) {
       setStatus("error");
+
+      if (requestError instanceof ApiRequestError) {
+        if (requestError.status === 401 || requestError.status === 403) {
+          return;
+        }
+
+        setError(getErrorMessage(requestError.status));
+        return;
+      }
 
       if (requestError instanceof DOMException && requestError.name === "AbortError") {
         setError("Timeout: Sunucu 15 saniye içinde cevap vermedi. Lütfen daha sonra tekrar deneyin.");
@@ -220,8 +571,6 @@ export default function Home() {
       }
 
       setError("Ağ bağlantısı kurulamadı. Backend sunucusunun http://localhost:8000 adresinde çalıştığından emin olun.");
-    } finally {
-      window.clearTimeout(timeoutId);
     }
   }
 
@@ -266,26 +615,329 @@ export default function Home() {
       </aside>
 
       <section className="flex min-h-screen flex-1 flex-col px-6 py-8 lg:px-10">
-        <nav className="border-b border-black/10 pb-5">
-          <p className="text-sm uppercase tracking-[0.35em] text-black/50">AI PHISHING DETECTOR</p>
-          <h1 className="mt-2 text-2xl font-semibold">Web URL Tarama Paneli</h1>
+        <nav className="flex items-center justify-between border-b border-black/10 pb-5">
+          <button
+            type="button"
+            onClick={() => {
+              setPageView("home");
+              setAuthMode(null);
+            }}
+            className="text-left"
+          >
+            <p className="text-sm uppercase tracking-[0.35em] text-black/50">AI PHISHING DETECTOR</p>
+            <h1 className="mt-2 text-2xl font-semibold">Web URL Tarama Paneli</h1>
+            {(authMode || pageView !== "home") && (
+              <span className="mt-4 inline-flex h-9 w-9 items-center justify-center rounded-full border border-black/15 text-xl leading-none transition hover:bg-black hover:text-white" aria-label="Ana sayfaya dön">
+                ‹
+              </span>
+            )}
+          </button>
+
+          {isSessionChecking ? (
+            <span className="rounded-full border border-black/10 px-5 py-2 text-sm text-black/50">Oturum kontrol ediliyor...</span>
+          ) : isLoggedIn ? (
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setIsProfileMenuOpen((isOpen) => !isOpen)}
+                className="rounded-full border border-black bg-black px-5 py-2 text-sm font-medium text-white transition hover:bg-white hover:text-black"
+              >
+                Profilim
+              </button>
+
+              {isProfileMenuOpen && (
+                <div className="absolute right-0 z-10 mt-3 w-48 rounded-2xl border border-black/10 bg-white p-2 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      openAuth("profile");
+                      setIsProfileMenuOpen(false);
+                    }}
+                    className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-black hover:text-white"
+                  >
+                    Profilim
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPageView("history");
+                      setAuthMode(null);
+                      setIsProfileMenuOpen(false);
+                    }}
+                    className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-black hover:text-white"
+                  >
+                    Geçmişim
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleLogout}
+                    className="w-full rounded-xl px-3 py-2 text-left text-sm hover:bg-black hover:text-white"
+                  >
+                    Çıkış yap
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() => openAuth("login")}
+                className="rounded-full border border-black bg-white px-5 py-2 text-sm font-medium text-black transition hover:bg-black hover:text-white"
+              >
+                Giriş Yap
+              </button>
+              <button
+                type="button"
+                onClick={() => openAuth("register")}
+                className="rounded-full border border-black bg-black px-5 py-2 text-sm font-medium text-white transition hover:bg-white hover:text-black"
+              >
+                Kayıt Ol
+              </button>
+            </div>
+          )}
         </nav>
 
-        <div className="grid flex-1 gap-8 py-10 xl:grid-cols-[1fr_1fr] xl:items-center">
-          <div>
-            <p className="mb-4 inline-flex rounded-full border border-black/15 px-4 py-2 text-sm text-black/70">
-              Oltalama bağlantılarını erken fark etmek için hızlı web arayüzü
-            </p>
-            <h2 className="max-w-3xl text-5xl font-semibold tracking-tight md:text-7xl">Lütfen linki yapıştırın.</h2>
-            <div className="mt-8 max-w-xl rounded-[2rem] border border-black/10 bg-white p-3 shadow-sm">
-              <Image
-                src="/phishing-illustration.svg"
-                alt="Phishing saldırılarına karşı güvenli bağlantı analizi illüstrasyonu"
-                width={720}
-                height={420}
-                className="h-auto w-full rounded-[1.5rem]"
-                priority
-              />
+        {authMode ? (
+          <section className="flex flex-1 items-center justify-center py-12">
+            <div className={`w-full ${authMode === "profile" ? "max-w-2xl" : "max-w-md"} rounded-[2rem] border border-black/10 bg-white p-8 shadow-2xl shadow-black/10`}>
+              <h2 className="text-3xl font-semibold">
+                {authMode === "login" && "Giriş Yap"}
+                {authMode === "register" && "Kayıt Ol"}
+                {authMode === "forgot" && "Şifremi Unuttum"}
+                {authMode === "profile" && "Profilim"}
+              </h2>
+              {authMode !== "profile" && (
+                <p className="mt-3 text-sm leading-6 text-black/60">
+                  {authMode === "forgot"
+                    ? "Gmail adresinizi girin; şifre sıfırlama kodu gönderme akışı backend hazır olduğunda aktifleşecek."
+                    : authMode === "register"
+                      ? "Kayıtlı değilseniz giriş yapmak için önce kayıt olunuz."
+                      : "Hesabınıza giriş yaptıktan sonra profil menüsünden geçmiş taramalarınıza ve kişisel istatistiklerinize ulaşabilirsiniz."}
+                </p>
+              )}
+
+              <form id="auth-form" key={authMode} onSubmit={handleAuthSubmit} autoComplete="off" className="mt-6 space-y-4">
+                {authMode === "register" && (
+                  <>
+                    <label className="block text-sm font-medium" htmlFor="name">
+                      Ad Soyad
+                    </label>
+                    <input
+                      id="name"
+                      name="full-name-field"
+                      type="text"
+                      autoComplete="off"
+                      required
+                      value={userName}
+                      onChange={(event) => setUserName(event.target.value)}
+                      placeholder="Adınız Soyadınız"
+                      className="w-full rounded-2xl border border-black/15 px-4 py-4 text-sm outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
+                    />
+                  </>
+                )}
+
+                {(authMode === "login" || authMode === "register") && (
+                  <>
+                    <label className="block text-sm font-medium" htmlFor="email">
+                      Gmail
+                    </label>
+                    <input
+                      id="email"
+                      name="email-field"
+                      type="email"
+                      autoComplete="off"
+                      required
+                      value={userEmail}
+                      onChange={(event) => setUserEmail(event.target.value)}
+                      placeholder="ornek@gmail.com"
+                      className="w-full rounded-2xl border border-black/15 px-4 py-4 text-sm outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
+                    />
+
+                    <label className="block text-sm font-medium" htmlFor="password">
+                      Şifre
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="password"
+                        name="password-field"
+                        type={isPasswordVisible ? "text" : "password"}
+                        autoComplete="new-password"
+                        required
+                        value={password}
+                        onChange={(event) => setPassword(event.target.value)}
+                        placeholder="Şifrenizi yazın"
+                        className="w-full rounded-2xl border border-black/15 px-4 py-4 pr-20 text-sm outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsPasswordVisible((isVisible) => !isVisible)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-black/60"
+                        aria-label={isPasswordVisible ? "Şifreyi gizle" : "Şifreyi göster"}
+                      >
+                        {isPasswordVisible ? "Gizle" : "Göster"}
+                      </button>
+                    </div>
+                  </>
+                )}
+
+                {authMode === "register" && (
+                  <div className="space-y-4">
+                    {password && (
+                      <div>
+                        <div className="h-2 overflow-hidden rounded-full bg-black/10">
+                          <div className={`h-full rounded-full transition-all ${passwordStrength.bar}`} style={{ width: `${passwordStrength.score}%` }} />
+                        </div>
+                        <p className={`mt-2 text-xs ${passwordStrength.text}`}>{passwordStrength.label}</p>
+                      </div>
+                    )}
+
+                    <label className="block text-sm font-medium" htmlFor="confirm-password">
+                      Şifrenizi onaylayın
+                    </label>
+                    <input
+                      id="confirm-password"
+                      name="confirm-password-field"
+                      type={isPasswordVisible ? "text" : "password"}
+                      autoComplete="new-password"
+                      required
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      placeholder="Şifrenizi tekrar yazın"
+                      className="w-full rounded-2xl border border-black/15 px-4 py-4 text-sm outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
+                    />
+                  </div>
+                )}
+
+                {authMode === "forgot" && (
+                  <>
+                    <label className="block text-sm font-medium" htmlFor="reset-email">
+                      Gmail
+                    </label>
+                    <input
+                      id="reset-email"
+                      name="reset-email-field"
+                      type="email"
+                      autoComplete="off"
+                      required
+                      value={resetEmail}
+                      onChange={(event) => setResetEmail(event.target.value)}
+                      placeholder="ornek@gmail.com"
+                      className="w-full rounded-2xl border border-black/15 px-4 py-4 text-sm outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
+                    />
+                  </>
+                )}
+
+                {authMode === "profile" && (
+                  <div className="space-y-4">
+                    <div className="rounded-3xl border border-black/10 bg-white p-5 text-black shadow-sm">
+                      <p className="text-xs uppercase tracking-[0.25em] text-black/40">Profil bilgileri</p>
+                      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl border border-black/10 bg-black/[0.03] p-4">
+                          <p className="text-xs text-black/45">Ad Soyad</p>
+                          <p className="mt-1 text-base font-semibold">{userName || "Ad Soyad"}</p>
+                        </div>
+                        <div className="rounded-2xl border border-black/10 bg-black/[0.03] p-4">
+                          <p className="text-xs text-black/45">E-posta</p>
+                          <p className="mt-1 break-all text-base font-semibold">{userEmail || "ornek@gmail.com"}</p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="rounded-3xl border border-black/10 bg-white p-5">
+                      <p className="text-xs uppercase tracking-[0.25em] text-black/40">Şifre değiştirme</p>
+                      <label className="mt-4 block text-sm font-medium" htmlFor="new-password">
+                        Yeni şifre
+                      </label>
+                    <div className="relative">
+                      <input
+                        id="new-password"
+                        name="new-password-field"
+                        type={isNewPasswordVisible ? "text" : "password"}
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={(event) => setNewPassword(event.target.value)}
+                        placeholder="Yeni şifrenizi yazın"
+                        className="w-full rounded-2xl border border-black/15 px-4 py-4 pr-20 text-sm outline-none transition placeholder:text-black/35 focus:border-black focus:ring-4 focus:ring-black/10"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setIsNewPasswordVisible((isVisible) => !isVisible)}
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-semibold text-black/60"
+                        aria-label={isNewPasswordVisible ? "Yeni şifreyi gizle" : "Yeni şifreyi göster"}
+                      >
+                        {isNewPasswordVisible ? "Gizle" : "Göster"}
+                      </button>
+                    </div>
+                    {newPassword && (
+                      <>
+                        <div className="h-2 overflow-hidden rounded-full bg-black/10">
+                          <div className={`h-full rounded-full transition-all ${newPasswordStrength.bar}`} style={{ width: `${newPasswordStrength.score}%` }} />
+                        </div>
+                        <p className={`text-xs ${newPasswordStrength.text}`}>{newPasswordStrength.label}</p>
+                      </>
+                    )}
+                    <p className="rounded-2xl border border-black/10 bg-black/[0.04] px-4 py-3 text-xs leading-5 text-black/60">
+                      Şifre değiştirme servisi backend tarafında henüz hazır değil. Backend entegrasyonu bekleniyor.
+                    </p>
+                    </div>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={authStatus === "loading" || authMode === "profile"}
+                  className="w-full rounded-2xl bg-black px-5 py-4 font-semibold text-white transition hover:bg-black/80 disabled:cursor-not-allowed disabled:bg-black/50"
+                >
+                  {authStatus === "loading"
+                    ? "İşleniyor..."
+                    : authMode === "forgot"
+                      ? "Gmail'e kod gönder"
+                      : authMode === "profile"
+                        ? "Backend entegrasyonu bekleniyor"
+                        : authMode === "register"
+                          ? "Kayıt Ol"
+                          : "Giriş Yap"}
+                </button>
+              </form>
+
+              {authMode === "login" && (
+                <button
+                  type="button"
+                  onClick={() => openAuth("forgot")}
+                  className="mt-4 text-sm font-medium text-black underline underline-offset-4"
+                >
+                  Şifremi unuttum
+                </button>
+              )}
+
+              {showRegisterPrompt && (
+                <div aria-live="assertive" className="mt-4 rounded-2xl border border-black/10 bg-black/[0.04] p-4 text-sm leading-6 text-black/75">
+                  <p className="font-medium text-black">Lütfen önce kayıt olunuz.</p>
+                  <p className="mt-1 text-xs text-black/60">Bu Gmail adresiyle kayıtlı kullanıcı bulunamadı.</p>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={goToRegisterFromPrompt}
+                      className="rounded-xl bg-black px-4 py-3 text-sm font-semibold text-white transition hover:bg-black/80"
+                    >
+                      Kayıt ol
+                    </button>
+                    <button
+                      type="button"
+                      onClick={closeRegisterPrompt}
+                      className="rounded-xl border border-black/15 bg-white px-4 py-3 text-sm font-semibold text-black transition hover:bg-black hover:text-white"
+                    >
+                      Vazgeç
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {authNotice && (
+                <p aria-live="polite" className="mt-4 rounded-2xl bg-black/[0.04] px-4 py-3 text-xs leading-5 text-black/65">
+                  {authNotice}
+                </p>
+              )}
             </div>
           </div>
 
