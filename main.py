@@ -133,9 +133,8 @@ async def scan_url(
             detail=f"Veritabanı kayıt hatası: {str(error)}",
         ) from error
 
-# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/register")
-def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db)):
+async def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db)):
     existing_user = db.query(models.User).filter(models.User.email == payload.email).first()
     if existing_user:
         raise HTTPException(status_code=400, detail="Bu e-posta adresi ile zaten kayıt olunmuş.")
@@ -163,9 +162,8 @@ def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db
         db.rollback()
         raise HTTPException(status_code=500, detail=f"Kayıt hatası: {str(e)}")
 
-# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/login")
-def login_user(
+async def login_user(
     payload: GirisYapRequest,
     response: Response,
     db: Session = Depends(database.get_db),
@@ -188,7 +186,7 @@ def login_user(
 
 
 @app.get("/api/v1/me")
-def get_current_user_info(current_user: models.User = Depends(auth.get_current_user)):
+async def get_current_user_info(current_user: models.User = Depends(auth.get_current_user)):
     return {
         "id": current_user.id,
         "ad_soyad": current_user.ad_soyad,
@@ -197,7 +195,7 @@ def get_current_user_info(current_user: models.User = Depends(auth.get_current_u
 
 
 @app.post("/api/v1/logout")
-def logout_user(response: Response):
+async def logout_user(response: Response):
     response.delete_cookie(
         key=auth.COOKIE_NAME,
         httponly=True,
@@ -206,9 +204,8 @@ def logout_user(response: Response):
     )
     return {"status": "success", "message": "Çıkış başarılı."}
 
-# Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/forgot-password")
-def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database.get_db)):
+async def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database.get_db)):
     user = db.query(models.User).filter(models.User.email == payload.email).first()
     if not user:
         raise HTTPException(status_code=404, detail="Bu e-posta adresine ait kayıt bulunamadı.")

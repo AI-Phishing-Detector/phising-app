@@ -42,7 +42,7 @@ def decode_access_token(token: str) -> dict:
         ) from exc
 
 
-def get_current_user(request: Request, db: Session = Depends(database.get_db)) -> models.User:
+async def get_current_user(request: Request, db: Session = Depends(database.get_db)) -> models.User:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise HTTPException(
