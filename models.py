@@ -14,10 +14,10 @@ class ScanLog(Base):
 
 # Yeni eklenen Kullanıcı tablosu
 class User(Base):
-    __tablename__ = "users"
+    __tablename__ = "kullanici"
 
     id = Column(Integer, primary_key=True, index=True)
     ad_soyad = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    sifre = Column(String, nullable=False)  # Gerçek projede hash'lenmeli ama şimdilik düz tutabiliriz
+    sifre = Column(String, nullable=False)
     created_at = Column(DateTime, default=datetime.datetime.utcnow)

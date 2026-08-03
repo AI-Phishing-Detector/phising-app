@@ -1,6 +1,6 @@
 from typing import Literal
 
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Response
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, HttpUrl, EmailStr, Field, ConfigDict, field_validator
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ import string
 import database
 import models
 from model_service import analyze_url
+import auth
 
 # .env dosyasındaki değişkenleri yükle
 load_dotenv()
@@ -143,7 +144,7 @@ def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db
         new_user = models.User(
             ad_soyad=payload.ad_soyad,
             email=payload.email,
-            sifre=payload.sifre
+            sifre=auth.hash_password(payload.sifre),
         )
         db.add(new_user)
         db.commit()
@@ -164,12 +165,46 @@ def register_user(payload: KayitOlRequest, db: Session = Depends(database.get_db
 
 # Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/login")
-def login_user(payload: GirisYapRequest, db: Session = Depends(database.get_db)):
-    user = db.query(models.User).filter(models.User.email == payload.email, models.User.sifre == payload.sifre).first()
-    if not user:
+def login_user(
+    payload: GirisYapRequest,
+    response: Response,
+    db: Session = Depends(database.get_db),
+):
+    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    if not user or not auth.verify_password(payload.sifre, user.sifre):
         raise HTTPException(status_code=400, detail="E-posta veya şifre hatalı.")
-    
-    return {"status": "success", "message": "Giriş başarılı.", "ad_soyad": user.ad_soyad}
+
+    token = auth.create_access_token(user.id, user.email)
+    response.set_cookie(
+        key=auth.COOKIE_NAME,
+        value=token,
+        httponly=True,
+        secure=auth.COOKIE_SECURE,
+        samesite="lax",
+        max_age=auth.JWT_EXPIRE_MINUTES * 60,
+    )
+
+    return {"status": "success", "message": "Giriş başarılı."}
+
+
+@app.get("/api/v1/me")
+def get_current_user_info(current_user: models.User = Depends(auth.get_current_user)):
+    return {
+        "id": current_user.id,
+        "ad_soyad": current_user.ad_soyad,
+        "email": current_user.email,
+    }
+
+
+@app.post("/api/v1/logout")
+def logout_user(response: Response):
+    response.delete_cookie(
+        key=auth.COOKIE_NAME,
+        httponly=True,
+        secure=auth.COOKIE_SECURE,
+        samesite="lax",
+    )
+    return {"status": "success", "message": "Çıkış başarılı."}
 
 # Veritabanı bağımlılığı (get_db) senkron olduğu için async kaldırıldı
 @app.post("/api/v1/forgot-password")
@@ -179,7 +214,7 @@ def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database
         raise HTTPException(status_code=404, detail="Bu e-posta adresine ait kayıt bulunamadı.")
     
     yeni_sifre = ''.join(random.choices(string.ascii_letters + string.digits, k=8))
-    user.sifre = yeni_sifre
+    user.sifre = auth.hash_password(yeni_sifre)
     db.commit()
 
     print("\n" + "="*50)
@@ -189,7 +224,6 @@ def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database
     print("="*50 + "\n")
 
     return {
-        "status": "success", 
+        "status": "success",
         "message": "Yeni şifreniz (test simülasyonu ile) konsola yazdırıldı.",
-        "debug_yeni_sifre": yeni_sifre
     }

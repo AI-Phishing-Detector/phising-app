@@ -1,5 +1,6 @@
 import os
 import tempfile
+import uuid
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport
@@ -10,6 +11,8 @@ from sqlalchemy.pool import StaticPool
 # Uygulama modülleri import edilirken zorunlu olan ayar. Dosya yolu vermeyerek
 # testlerin fiziksel bir SQLite veritabanı oluşturmasını engelliyoruz.
 os.environ["DATABASE_URL"] = "sqlite://"
+os.environ["JWT_SECRET"] = "test-secret-key"
+os.environ["COOKIE_SECURE"] = "false"
 test_cache_dir = tempfile.TemporaryDirectory(prefix="phishing-test-tldextract-")
 os.environ["TLDEXTRACT_CACHE"] = test_cache_dir.name
 
@@ -211,3 +214,102 @@ async def test_scan_url_db_error_and_rollback(mocker, async_client):
     assert "Veritabanı kayıt hatası" in response.json()["detail"]
     mock_commit.assert_called_once()
     mock_rollback.assert_called_once()
+
+
+# =====================================================================
+# AUTH ENDPOINT TESTLERİ (login, logout, me)
+# =====================================================================
+
+TEST_USER = {
+    "ad_soyad": "Test Kullanıcı",
+    "email": "test@example.com",
+    "sifre": "GucluSifre123",
+}
+
+
+@pytest_asyncio.fixture
+async def registered_user(async_client):
+    """Test kullanıcısını kaydet ve temiz bilgileri döndür."""
+    user_data = {
+        **TEST_USER,
+        "email": f"test-{uuid.uuid4().hex[:8]}@example.com",
+    }
+    response = await async_client.post("/api/v1/register", json=user_data)
+    assert response.status_code == 200
+    return user_data
+
+
+@pytest.mark.asyncio
+async def test_login_success_sets_cookie(async_client, registered_user):
+    response = await async_client.post(
+        "/api/v1/login",
+        json={"email": registered_user["email"], "sifre": registered_user["sifre"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "success"
+    assert "access_token" in response.cookies
+    assert "ad_soyad" not in response.json()
+
+
+@pytest.mark.asyncio
+async def test_login_invalid_credentials(async_client, registered_user):
+    response = await async_client.post(
+        "/api/v1/login",
+        json={"email": registered_user["email"], "sifre": "yanlis-sifre"},
+    )
+
+    assert response.status_code == 400
+    assert "hatalı" in response.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_me_returns_current_user(async_client, registered_user):
+    login_response = await async_client.post(
+        "/api/v1/login",
+        json={"email": registered_user["email"], "sifre": registered_user["sifre"]},
+    )
+    assert login_response.status_code == 200
+
+    me_response = await async_client.get("/api/v1/me")
+
+    assert me_response.status_code == 200
+    data = me_response.json()
+    assert data["email"] == registered_user["email"]
+    assert data["ad_soyad"] == registered_user["ad_soyad"]
+    assert "id" in data
+    assert "sifre" not in data
+
+
+@pytest.mark.asyncio
+async def test_me_unauthenticated(async_client):
+    response = await async_client.get("/api/v1/me")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_logout_clears_session(async_client, registered_user):
+    login_response = await async_client.post(
+        "/api/v1/login",
+        json={"email": registered_user["email"], "sifre": registered_user["sifre"]},
+    )
+    assert login_response.status_code == 200
+
+    logout_response = await async_client.post("/api/v1/logout")
+    assert logout_response.status_code == 200
+    assert logout_response.json()["status"] == "success"
+
+    me_response = await async_client.get("/api/v1/me")
+    assert me_response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_forgot_password_no_debug_leak(async_client, registered_user):
+    response = await async_client.post(
+        "/api/v1/forgot-password",
+        json={"email": registered_user["email"]},
+    )
+
+    assert response.status_code == 200
+    assert "debug_yeni_sifre" not in response.json()
