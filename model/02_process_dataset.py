@@ -356,9 +356,7 @@ def process_csv(input_filename: str, output_filename: str):
     label_column = next((col for col in df.columns if col.lower() in target_cols), None)
 
     if not label_column:
-        # Bulamazsa yine de fallback olarak 2. sütunu al ama uyar
-        label_column = df.columns[1]
-        print(f"Uyarı: Beklenen etiket isimleri bulunamadı, {label_column} sütunu kullanılıyor.")
+        raise ValueError("Veri setinde hedef etiket sütunu bulunamadı.")
 
     df_features.insert(1, 'is_phishing', df[label_column])
     print(f"Hedef etiket olan '{label_column}' sütunu, 'is_phishing' adıyla ikinci sıraya eklendi.")
