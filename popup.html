@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <title>AI Phishing Shield</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="card">
+    <!-- Başlık -->
+    <div class="header">
+      <div class="logo">
+        <span class="logo-shield">🛡️</span>
+        <span class="logo-text">AI Shield</span>
+      </div>
+      <div class="switch-container" title="Korumayı Etkinleştir / Devre Dışı Bırak">
+        <label class="switch">
+          <input type="checkbox" id="shieldToggle" checked>
+          <span class="slider round"></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Aktif Sekme Durumu -->
+    <div class="status-box" id="statusBox">
+      <div class="status-loading">
+        <div class="spinner"></div>
+        <p>Sayfa durumu kontrol ediliyor...</p>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- Manuel Sorgulama Bölümü -->
+    <div class="manual-scan">
+      <h3>Hızlı URL Taraması</h3>
+      <div class="input-group">
+        <input type="text" id="manualUrl" placeholder="https://ornek.com" />
+        <button id="btnScan">Analiz Et</button>
+      </div>
+      <div id="manualResult" class="manual-result hidden"></div>
+    </div>
+
+    <!-- Alt Bilgi -->
+    <div class="footer">
+      Staj Projesi Demo • Yapay Zeka Desteği
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

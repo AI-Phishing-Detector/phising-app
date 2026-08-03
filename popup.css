@@ -1,0 +1,295 @@
+:root {
+  --bg-color: #0b0c10;
+  --text-color: #f1f1f1;
+  --primary-color: #66fcf1;
+  --primary-glow: rgba(102, 252, 241, 0.3);
+  --danger-color: #ff3344;
+  --danger-glow: rgba(255, 51, 68, 0.3);
+  --success-color: #00e676;
+  --success-glow: rgba(0, 230, 118, 0.3);
+  --glass-bg: rgba(255, 255, 255, 0.03);
+  --glass-border: rgba(255, 255, 255, 0.08);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  width: 320px;
+  background-color: var(--bg-color);
+  color: var(--text-color);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  overflow: hidden;
+}
+
+.card {
+  padding: 18px;
+  background: radial-gradient(circle at top right, rgba(102, 252, 241, 0.05), transparent);
+}
+
+/* Başlık */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.logo {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.logo-shield {
+  font-size: 20px;
+}
+
+.logo-text {
+  font-weight: 800;
+  font-size: 16px;
+  background: linear-gradient(135deg, #fff, var(--primary-color));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.version {
+  font-size: 10px;
+  color: rgba(255, 255, 255, 0.3);
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  padding: 2px 6px;
+  border-radius: 6px;
+}
+
+/* Durum Kutusu */
+.status-box {
+  background: var(--glass-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.status-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: rgba(255, 255, 255, 0.5);
+  font-size: 12px;
+}
+
+.spinner {
+  width: 20px;
+  height: 20px;
+  border: 2px solid rgba(255, 255, 255, 0.1);
+  border-top-color: var(--primary-color);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Güvenli ve Zararlı Kart Tasarımları */
+.status-card {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.status-icon {
+  font-size: 32px;
+}
+
+.status-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.status-score {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 100px;
+}
+
+/* Kart Varyasyonları */
+.status-safe .status-title { color: var(--success-color); }
+.status-safe .status-score {
+  background: rgba(0, 230, 118, 0.1);
+  border: 1px solid rgba(0, 230, 118, 0.2);
+  color: var(--success-color);
+}
+.status-safe .status-icon { filter: drop-shadow(0 0 8px var(--success-glow)); }
+
+.status-danger .status-title { color: var(--danger-color); }
+.status-danger .status-score {
+  background: rgba(255, 51, 68, 0.1);
+  border: 1px solid rgba(255, 51, 68, 0.2);
+  color: var(--danger-color);
+}
+.status-danger .status-icon { filter: drop-shadow(0 0 8px var(--danger-glow)); }
+
+.status-neutral .status-title { color: rgba(255, 255, 255, 0.6); }
+.status-neutral .status-score {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.divider {
+  height: 1px;
+  background: var(--glass-border);
+  margin: 16px 0;
+}
+
+/* Manuel Arama */
+.manual-scan h3 {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 0 0 10px 0;
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.input-group {
+  display: flex;
+  gap: 8px;
+}
+
+input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.3);
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #fff;
+  font-size: 12px;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+input:focus {
+  border-color: var(--primary-color);
+}
+
+button {
+  background-color: var(--text-color);
+  color: var(--bg-color);
+  border: none;
+  border-radius: 8px;
+  padding: 0 14px;
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.1s;
+}
+
+button:hover {
+  opacity: 0.9;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+/* Arama Sonucu */
+.manual-result {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+  border: 1px solid transparent;
+}
+
+.manual-result.success {
+  background: rgba(0, 230, 118, 0.05);
+  border-color: rgba(0, 230, 118, 0.15);
+  color: var(--success-color);
+}
+
+.manual-result.danger {
+  background: rgba(255, 51, 68, 0.05);
+  border-color: rgba(255, 51, 68, 0.15);
+  color: var(--danger-color);
+}
+
+.hidden {
+  display: none !important;
+}
+
+.footer {
+  margin-top: 16px;
+  text-align: center;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.25);
+}
+
+/* Toggle Switch Styles */
+.switch-container {
+  display: flex;
+  align-items: center;
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 42px;
+  height: 22px;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid var(--glass-border);
+  transition: .3s;
+}
+
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 14px;
+  width: 14px;
+  left: 3px;
+  bottom: 3px;
+  background-color: rgba(255, 255, 255, 0.6);
+  transition: .3s;
+}
+
+input:checked + .slider {
+  background-color: rgba(102, 252, 241, 0.2);
+  border-color: var(--primary-color);
+}
+
+input:checked + .slider:before {
+  transform: translateX(20px);
+  background-color: var(--primary-color);
+}
+
+.slider.round {
+  border-radius: 34px;
+}
+
+.slider.round:before {
+  border-radius: 50%;
+}

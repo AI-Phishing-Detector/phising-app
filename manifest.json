@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "AI Phishing Shield",
+  "version": "1.0.0",
+  "description": "Yapay zeka destekli gerçek zamanlı oltalama (phishing) koruma eklentisi.",
+  "permissions": [
+    "storage",
+    "webNavigation",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://*/*",
+    "https://*/*",
+    "https://phishing-detector-backend-production.up.railway.app/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
