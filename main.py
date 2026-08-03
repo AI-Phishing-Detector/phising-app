@@ -220,7 +220,6 @@ def forgot_password(payload: SifreUnuttumRequest, db: Session = Depends(database
     print("\n" + "="*50)
     print(f"🔑 [TEST ŞİFRE MAİLİ - SİMÜLASYON]")
     print(f"Kime (Alıcı)       : {payload.email}")
-    print(f"Yeni Geçici Şifre  : {yeni_sifre}")
     print("="*50 + "\n")
 
     return {
