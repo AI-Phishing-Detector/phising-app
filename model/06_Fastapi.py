@@ -106,7 +106,11 @@ def max_consecutive_chars(text: str) -> int:
 def is_ip_address(hostname: str) -> int:
     if not hostname:
         return 0
-    host = hostname.split(':')[0]
+
+    host = hostname.strip("[]")
+    if ":" in host and host.count(":") <= 1:
+        host = host.split(':')[0]
+
     try:
         ipaddress.ip_address(host)
         return 1
@@ -204,17 +208,20 @@ def extract_features(url: str) -> dict:
 # =====================================================================
 # 3. FASTAPI UYGULAMASI VE MODEL YÜKLEME
 # =====================================================================
+from pathlib import Path
 
 app = FastAPI(title="Phishing Detection API", description="Yapay Zeka Destekli Oltalama Tespiti")
 
+BASE_DIR = Path(__file__).resolve().parent
+MODEL_PATH = BASE_DIR / "model_artifacts" / "phishing_detection_model.pkl"
+
 print("Yapay Zeka Modeli Yükleniyor...")
 try:
-    model = joblib.load("phishing_detection_model.pkl")
+    model = joblib.load(MODEL_PATH)
     print("Model Başarıyla Yüklendi! 🚀")
 except Exception as e:
-    print(f"HATA: Model yüklenemedi! Lütfen 'phishing_detection_model.pkl' dosyasını kontrol edin. Detay: {e}")
+    print(f"HATA: Model yüklenemedi! Lütfen '{MODEL_PATH}' dosyasını kontrol edin. Detay: {e}")
     model = None
-
 
 class URLInput(BaseModel):
     url: str
@@ -242,7 +249,7 @@ def predict_phishing(data: URLInput):
 
         # 3. Modele Sor (Predict Proba)
         probabilities = model.predict_proba(df_for_model)[0]
-        phishing_prob = probabilities[1]
+        phishing_prob = float(probabilities[1])  # Sadece buraya float() eklendi
 
         # 4. Karar Mekanizması (Eşik Değeri)
         is_phishing = bool(phishing_prob >= PHISHING_THRESHOLD)

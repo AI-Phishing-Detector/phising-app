@@ -94,10 +94,15 @@ def max_consecutive_chars(text: str) -> int:
             current_count = 1
     return max_count
 
+
 def is_ip_address(hostname: str) -> int:
     if not hostname:
         return 0
-    host = hostname.split(':')[0]
+
+    host = hostname.strip("[]")
+    if ":" in host and host.count(":") <= 1:
+        host = host.split(':')[0]
+
     try:
         ipaddress.ip_address(host)
         return 1
@@ -145,7 +150,7 @@ def extract_features(url: str) -> dict[str, Any]:
         'ardisik_karakter_sayisi': 0, 'entropi': 0.0
     }
 
-    if not url:
+    if not url or not str(url).strip():
         return default_features
 
     try:

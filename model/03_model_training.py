@@ -9,8 +9,8 @@ from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from pathlib import Path
 
-# LightGBM uyarılarını gizlemek için
 warnings.filterwarnings("ignore")
 
 
@@ -58,15 +58,15 @@ def train_and_evaluate_models(X_train, X_test, y_train, y_test) -> tuple:
     """Modelleri eğitir, GridSearch ile optimize eder ve sonuç tablosunu döndürür."""
     models_config = {
         "Random Forest": {
-            "model": RandomForestClassifier(random_state=42, n_jobs=-1),
+            "model": RandomForestClassifier(random_state=42, n_jobs=1),
             "params": {"n_estimators": [100, 200], "max_depth": [10, 20, None], "min_samples_split": [2, 5]}
         },
         "LightGBM": {
-            "model": LGBMClassifier(random_state=42, n_jobs=-1, verbose=-1),
+            "model": LGBMClassifier(random_state=42, n_jobs=1, verbose=-1),
             "params": {"n_estimators": [100, 200], "learning_rate": [0.05, 0.1], "max_depth": [10, 20, -1]}
         },
         "XGBoost": {
-            "model": XGBClassifier(eval_metric='logloss', random_state=42, n_jobs=-1),
+            "model": XGBClassifier(eval_metric='logloss', random_state=42, n_jobs=1),
             "params": {"n_estimators": [100, 200], "learning_rate": [0.05, 0.1], "max_depth": [3, 6, 9]}
         }
     }
@@ -130,7 +130,11 @@ def print_summary_table(results: list) -> None:
 if __name__ == "__main__":
     # 1. Dosya Yolları
     DATASET_PATH = "02_features_extracted.csv"
-    OUTPUT_MODEL_PATH = "phishing_detection_model.pkl"
+
+    BASE_DIR = Path(__file__).resolve().parent
+    MODEL_DIR = BASE_DIR / "model_artifacts"
+    MODEL_DIR.mkdir(exist_ok=True)
+    OUTPUT_MODEL_PATH = MODEL_DIR / "phishing_detection_model.pkl"
 
     # 2. Süreci Başlat
     X_train, X_test, y_train, y_test = load_and_split_data(DATASET_PATH)

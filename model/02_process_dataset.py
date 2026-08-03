@@ -11,6 +11,7 @@ import math
 import json
 from collections import Counter
 
+
 # =====================================================================
 # ÖZELLİK ÇIKARIM AYARLARI VE LİSTELERİ
 # =====================================================================
@@ -114,19 +115,23 @@ def max_consecutive_chars(text: str) -> int:
             current_count = 1
     return max_count
 
+
+
 def is_ip_address(hostname: str) -> int:
-    """
-    Checks if the hostname is an IP address (IPv4 or IPv6). Malicious sites sometimes use direct IP addresses instead of domain names.
-    Hostname kısmının bir IP adresi (IPv4 veya IPv6) olup olmadığını kontrol eder.
-    """
     if not hostname:
         return 0
-    host = hostname.split(':')[0]
+
+    host = hostname.strip("[]")
+    if ":" in host and host.count(":") <= 1:
+        host = host.split(':')[0]
+
     try:
         ipaddress.ip_address(host)
         return 1
     except ValueError:
         return 0
+
+
 
 def normalize_text(text: str) -> str:
     """
@@ -208,8 +213,8 @@ def extract_features(url: str) -> dict:
         'ardisik_karakter_sayisi': 0,
         'entropi': 0.0
     }
-    
-    if not url:
+
+    if not url or not str(url).strip():
         return default_features
         
     try:
@@ -345,11 +350,18 @@ def process_csv(input_filename: str, output_filename: str):
             print("=" * 50)
             
     df_features = pd.DataFrame(feature_list)
-    
-    # Girdi dosyasının 2. sütununu doğrudan hedef etiket olarak ekliyoruz
-    label_column = df.columns[1]
+
+    # Girdi dosyasının etiket sütununu akıllı olarak bul
+    target_cols = ['status', 'label', 'class', 'result', 'is_phishing', 'type']
+    label_column = next((col for col in df.columns if col.lower() in target_cols), None)
+
+    if not label_column:
+        # Bulamazsa yine de fallback olarak 2. sütunu al ama uyar
+        label_column = df.columns[1]
+        print(f"Uyarı: Beklenen etiket isimleri bulunamadı, {label_column} sütunu kullanılıyor.")
+
     df_features.insert(1, 'is_phishing', df[label_column])
-    print(f"Hedef etiket olan ikinci sütun ('{label_column}'), 'is_phishing' adıyla ikinci sıraya eklendi.")
+    print(f"Hedef etiket olan '{label_column}' sütunu, 'is_phishing' adıyla ikinci sıraya eklendi.")
         
     df_features.to_csv(output_filename, index=False)
     
