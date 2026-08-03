@@ -272,8 +272,8 @@ def extract_features(url: str) -> dict:
             'entropi': calculate_entropy(cleaned_url)
         }
         
-    except Exception:
-        return default_features
+    except Exception as e:
+        raise RuntimeError(f"Özellik çıkarılırken hata oluştu: {str(e)}")
 
 # =====================================================================
 # VERİ SETİ TOPLU İŞLEME VE RAPORLAMA FONKSİYONU
