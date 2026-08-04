@@ -1,9 +1,10 @@
 .env
-phishing.db
+.venv*/
+venv/
 *.db
+*.sqlite
+*.sqlite3
 __pycache__/
-venv312/
+model/model_artifacts/
 *.py[cod]
 .pytest_cache/
-.venv/
-venv312/
