@@ -182,7 +182,11 @@ async def login_user(
         max_age=auth.JWT_EXPIRE_MINUTES * 60,
     )
 
-    return {"status": "success", "message": "Giriş başarılı."}
+    return {
+    "status": "success",
+    "message": "Giriş başarılı.",
+    "ad_soyad": user.ad_soyad,
+}
 
 
 @app.get("/api/v1/me")
