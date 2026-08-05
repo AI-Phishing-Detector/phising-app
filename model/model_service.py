@@ -28,31 +28,20 @@ EXCLUDED_FEATURE_COLUMNS = {
     "url_uzunlugu",
     "alan_adi_uzunlugu",
     "alan_adi_uzantisi",
-    "soru_isareti_sayisi",
-    "esittir_sayisi",
 }
 
 TRUSTED_TLDS = {
     "com", "net", "org", "gov", "edu", "mil", "co", "io",
     "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us",
-<<<<<<< HEAD
     "com.tr", "org.tr", "net.tr", "edu.tr", "gov.tr", "co.uk", "ac.uk"
-=======
-    "com.tr", "co.uk", "com.au"
->>>>>>> dc2b92d52d01d8a29eef37d096e8ddd0061555be
 }
 
 POPULAR_BRANDS = {
     "google", "paypal", "netflix", "microsoft", "apple", "amazon",
     "facebook", "instagram", "twitter", "linkedin", "yahoo", "live",
     "outlook", "dropbox", "github", "steam", "spotify", "binance",
-<<<<<<< HEAD
     "coinbase", "americanexpress", "youtube", "twitch", "tiktok",
-    "whatsapp", "telegram", "discord"
-=======
-    "coinbase", "americanexpress", "youtube", "tiktok", "whatsapp",
-    "trendyol", "hepsiburada", "turkiye"
->>>>>>> dc2b92d52d01d8a29eef37d096e8ddd0061555be
+    "whatsapp", "telegram", "discord", "trendyol", "hepsiburada", "turkiye"
 }
 
 SHORTENERS = {
@@ -148,7 +137,7 @@ def check_brand_spoofing(url: str, domain: str) -> int:
     normalized_domain = normalize_text(domain_lower)
     normalized_url = normalize_text(url_lower)
 
-    homoglyphs = {'0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's', '8': 'b', '9': 'g'}
+    homoglyphs = {'0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's', '8': 'b', '9': 'g', 'i': 'l'}
     for char, replacement in homoglyphs.items():
         normalized_domain = normalized_domain.replace(char, replacement)
         normalized_url = normalized_url.replace(char, replacement)
@@ -190,11 +179,19 @@ def extract_features(url: str) -> dict[str, Any]:
 
         url_path = parsed_url.path + parsed_url.query
 
+        ham_nokta_sayisi = cleaned_url.count('.')
+        ham_ozel_karakter = count_special_chars(cleaned_url)
+
+        tld_nokta_sayisi = suffix.count('.') if suffix else 0
+
+        gercek_nokta_sayisi = max(0, ham_nokta_sayisi - tld_nokta_sayisi)
+        gercek_ozel_karakter = max(0, ham_ozel_karakter - tld_nokta_sayisi)
+
         return {
             'url_uzunlugu': len(cleaned_url),
             'alan_adi_uzunlugu': len(hostname),
             'ip_adresi_var_mi': is_ip_address(hostname),
-            'nokta_sayisi': cleaned_url.count('.'),
+            'nokta_sayisi': gercek_nokta_sayisi,
             'tire_sayisi': cleaned_url.count('-'),
             'et_isareti_sayisi': cleaned_url.count('@'),
             'soru_isareti_sayisi': cleaned_url.count('?'),
@@ -210,7 +207,7 @@ def extract_features(url: str) -> dict[str, Any]:
             'parametre_sayisi': len(parse_qsl(parsed_url.query)),
             'supheli_kelime_sayisi': count_suspicious_words(cleaned_url),
             'alan_adi_uzantisi': suffix.lower() if suffix else "",
-            'ozel_karakter_sayisi': count_special_chars(cleaned_url),
+            'ozel_karakter_sayisi': gercek_ozel_karakter,
             'rakam_sayisi': count_digits(cleaned_url),
             'ardisik_karakter_sayisi': max_consecutive_chars(hostname),
             'entropi': calculate_entropy(cleaned_url)
@@ -246,9 +243,7 @@ def analyze_url(url: str) -> dict[str, Any]:
         for class_name, probability in zip(model.classes_, probabilities)
     }
 
-<<<<<<< HEAD
-    phishing_probability = round(probability_by_class.get(PHISHING_CLASS, 0.0) * 100, 2)
-=======
+
     raw_phishing_probability = probability_by_class.get(PHISHING_CLASS, 0.0) * 100
 
     # Modelin eğitim kümesindeki barındırma-platformu yanlılığını dengele:
@@ -276,12 +271,6 @@ def analyze_url(url: str) -> dict[str, Any]:
 
     phishing_probability = round(calibrated_probability, 2)
     safe_probability = round(100.0 - phishing_probability, 2)
->>>>>>> dc2b92d52d01d8a29eef37d096e8ddd0061555be
-
-    if raw_features.get('marka_taklidi_var_mi', 0) == 1:
-        phishing_probability = min(99.9, phishing_probability + 40.0)
-
-    safe_probability = round(max(0.0, 100.0 - phishing_probability), 2)
     is_phishing = phishing_probability >= (PHISHING_THRESHOLD * 100)
 
     return {
