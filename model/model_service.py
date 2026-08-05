@@ -31,14 +31,16 @@ EXCLUDED_FEATURE_COLUMNS = {
 
 TRUSTED_TLDS = {
     "com", "net", "org", "gov", "edu", "mil", "co", "io",
-    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us"
+    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us",
+    "com.tr", "org.tr", "net.tr", "edu.tr", "gov.tr", "co.uk", "ac.uk"
 }
 
 POPULAR_BRANDS = {
     "google", "paypal", "netflix", "microsoft", "apple", "amazon",
     "facebook", "instagram", "twitter", "linkedin", "yahoo", "live",
     "outlook", "dropbox", "github", "steam", "spotify", "binance",
-    "coinbase", "americanexpress"
+    "coinbase", "americanexpress", "youtube", "twitch", "tiktok",
+    "whatsapp", "telegram", "discord"
 }
 
 SHORTENERS = {
@@ -57,11 +59,13 @@ SUSPICIOUS_WORDS = {
     'recover', 'validation', 'alert', 'safe'
 }
 
+
 def clean_url(url: str) -> str:
     url = url.strip()
     if not url.lower().startswith(('http://', 'https://')):
         url = 'http://' + url
     return url.replace("://www.", "://").replace("://WWW.", "://")
+
 
 def calculate_entropy(text: str) -> float:
     if not text:
@@ -69,16 +73,20 @@ def calculate_entropy(text: str) -> float:
     probabilities = [count / len(text) for count in Counter(text).values()]
     return -sum(p * math.log2(p) for p in probabilities)
 
+
 def count_suspicious_words(url: str) -> int:
     url_lower = url.lower()
     return sum(url_lower.count(word) for word in SUSPICIOUS_WORDS)
+
 
 def count_special_chars(url: str) -> int:
     special_chars = "-_%@=~#&$+;!*(),^|{}[]"
     return sum(1 for char in url if char in special_chars)
 
+
 def count_digits(url: str) -> int:
     return sum(1 for char in url if char.isdigit())
+
 
 def max_consecutive_chars(text: str) -> int:
     if not text:
@@ -109,6 +117,7 @@ def is_ip_address(hostname: str) -> int:
     except ValueError:
         return 0
 
+
 def normalize_text(text: str) -> str:
     if not text:
         return ""
@@ -116,6 +125,7 @@ def normalize_text(text: str) -> str:
         c for c in unicodedata.normalize('NFD', text)
         if unicodedata.category(c) != 'Mn'
     )
+
 
 def check_brand_spoofing(url: str, domain: str) -> int:
     url_lower = url.lower()
@@ -137,6 +147,7 @@ def check_brand_spoofing(url: str, domain: str) -> int:
         if 0.80 <= similarity < 1.0:
             return 1
     return 0
+
 
 def extract_features(url: str) -> dict[str, Any]:
     default_features = {
@@ -222,8 +233,11 @@ def analyze_url(url: str) -> dict[str, Any]:
     }
 
     phishing_probability = round(probability_by_class.get(PHISHING_CLASS, 0.0) * 100, 2)
-    safe_probability = round(probability_by_class.get(SAFE_CLASS, 0.0) * 100, 2)
 
+    if raw_features.get('marka_taklidi_var_mi', 0) == 1:
+        phishing_probability = min(99.9, phishing_probability + 40.0)
+
+    safe_probability = round(max(0.0, 100.0 - phishing_probability), 2)
     is_phishing = phishing_probability >= (PHISHING_THRESHOLD * 100)
 
     return {
