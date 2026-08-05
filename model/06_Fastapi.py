@@ -25,14 +25,16 @@ PHISHING_THRESHOLD = 0.30
 # Özellik Çıkarım Listeleri (Arkadaşının tanımladığı sabitler)
 TRUSTED_TLDS = {
     "com", "net", "org", "gov", "edu", "mil", "co", "io",
-    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us"
+    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us",
+    "com.tr", "org.tr", "net.tr", "edu.tr", "gov.tr", "co.uk", "ac.uk"
 }
 
 POPULAR_BRANDS = {
     "google", "paypal", "netflix", "microsoft", "apple", "amazon",
     "facebook", "instagram", "twitter", "linkedin", "yahoo", "live",
     "outlook", "dropbox", "github", "steam", "spotify", "binance",
-    "coinbase", "americanexpress"
+    "coinbase", "americanexpress", "youtube", "twitch", "tiktok",
+    "whatsapp", "telegram", "discord"
 }
 
 SHORTENERS = {
@@ -249,12 +251,16 @@ def predict_phishing(data: URLInput):
 
         # 3. Modele Sor (Predict Proba)
         probabilities = model.predict_proba(df_for_model)[0]
-        phishing_prob = float(probabilities[1])  # Sadece buraya float() eklendi
+        phishing_prob = float(probabilities[1])
+
+        if features_dict.get('marka_taklidi_var_mi', 0) == 1:
+            phishing_prob = min(0.999, phishing_prob + 0.40)
 
         # 4. Karar Mekanizması (Eşik Değeri)
         is_phishing = bool(phishing_prob >= PHISHING_THRESHOLD)
-        confidence = float(phishing_prob if is_phishing else probabilities[0])
 
+        # Güven skorunu manuel müdahaleye göre yeniden hesapla
+        confidence = float(phishing_prob if is_phishing else max(0.0, 1.0 - phishing_prob))
         return {
             "url": target_url,
             "is_phishing": is_phishing,
