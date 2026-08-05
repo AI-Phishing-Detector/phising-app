@@ -1,0 +1,1 @@
+"""Phishing modelinin çalışma zamanı paketini tanımlar."""

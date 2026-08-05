@@ -258,7 +258,7 @@ async def test_login_success_sets_cookie(async_client, registered_user):
     assert response.status_code == 200
     assert response.json()["status"] == "success"
     assert "access_token" in response.cookies
-    assert "ad_soyad" not in response.json()
+    assert response.json()["ad_soyad"] == registered_user["ad_soyad"]
 
 
 @pytest.mark.asyncio
