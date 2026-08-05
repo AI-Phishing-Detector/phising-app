@@ -250,7 +250,7 @@ def analyze_url(url: str) -> dict[str, Any]:
         calibrated_probability = min(calibrated_probability, 5.0)
         calibration = "trusted_brand_root"
     elif raw_features.get("marka_taklidi_var_mi", 0) == 1:
-        calibrated_probability = max(calibrated_probability, 90.0)
+        calibrated_probability = max(calibrated_probability, 95.0)
         calibration = "brand_spoof"
 
     phishing_probability = round(calibrated_probability, 2)
