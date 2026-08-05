@@ -1,15 +1,17 @@
-import os
-import re
-import time
-import ipaddress
-import unicodedata
 import difflib
-from urllib.parse import urlparse, parse_qsl
+import ipaddress
+import math
+import time
+import unicodedata
+from collections import Counter
+from pathlib import Path
+from urllib.parse import parse_qsl, urlparse
+
 import pandas as pd
 import tldextract
-import math
-import json
-from collections import Counter
+
+
+TLD_EXTRACTOR = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
 
 
 # =====================================================================
@@ -19,7 +21,8 @@ from collections import Counter
 # Güvenilir ve yaygın kullanılan alan adı uzantıları (Beyaz Liste)
 TRUSTED_TLDS = {
     "com", "net", "org", "gov", "edu", "mil", "co", "io", 
-    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us"
+    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us",
+    "com.tr", "co.uk", "com.au"
 }
 
 # Oltalama saldırılarında en çok taklit edilen popüler markalar
@@ -27,7 +30,8 @@ POPULAR_BRANDS = {
     "google", "paypal", "netflix", "microsoft", "apple", "amazon", 
     "facebook", "instagram", "twitter", "linkedin", "yahoo", "live", 
     "outlook", "dropbox", "github", "steam", "spotify", "binance", 
-    "coinbase", "americanexpress"
+    "coinbase", "americanexpress", "youtube", "tiktok", "whatsapp",
+    "trendyol", "hepsiburada", "turkiye"
 }
 
 # Popüler link kısaltma servislerinin alan adları
@@ -73,8 +77,12 @@ def count_special_chars(url: str) -> int:
     Count of special characters (-_%@=~) commonly used in malicious URLs.
     Kötü amaçlı URL'lerde yaygın olarak kullanılan özel karakterlerin (-_%@=~) sayısı.
     """
-    special_chars = "-_%@=~#&$+;!*(),^|{}[]"
-    return sum(1 for char in url if char in special_chars)
+    # Query ayraçları (?, =, &, +) tek başına risk sinyali değildir.
+    # Bu nedenle yalnızca host/path/fragment içindeki karakterleri sayıyoruz.
+    parsed = urlparse(url)
+    lexical_target = f"{parsed.hostname or ''}{parsed.path}{parsed.fragment}"
+    special_chars = "-_%@~#$;!*(),^|{}[]"
+    return sum(1 for char in lexical_target if char in special_chars)
 
 def count_digits(url: str) -> int:
     """
@@ -93,7 +101,9 @@ def clean_url(url: str) -> str:
     URL'nin başındaki boşlukları temizler ve şema (http/https) yoksa ekler.
     """
     url = url.strip()
-    if not url.lower().startswith(('http://', 'https://')):
+    if url.startswith('//'):
+        url = 'http:' + url
+    elif not url.lower().startswith(('http://', 'https://')):
         url = 'http://' + url
     url = url.replace("://www.", "://").replace("://WWW.", "://")
     return url
@@ -177,7 +187,7 @@ def check_brand_spoofing(url: str, domain: str) -> int:
                 
         # Metin benzerliğini ölç (Örn: goggle vs google)
         similarity = difflib.SequenceMatcher(None, normalized_domain, brand).ratio()
-        if 0.80 <= similarity < 1.0:
+        if 0.70 <= similarity < 1.0:
             return 1
             
     return 0
@@ -222,7 +232,7 @@ def extract_features(url: str) -> dict:
         parsed_url = urlparse(cleaned_url)
         hostname = parsed_url.hostname or ""
         
-        extracted = tldextract.extract(cleaned_url)
+        extracted = TLD_EXTRACTOR(cleaned_url)
         domain = extracted.domain
         subdomain = extracted.subdomain
         suffix = extracted.suffix
@@ -278,27 +288,30 @@ def extract_features(url: str) -> dict:
             'entropi': calculate_entropy(cleaned_url)
         }
         
-    except Exception:
-        return default_features
+    except Exception as e:
+        raise RuntimeError(f"Özellik çıkarılırken hata oluştu: {str(e)}")
 
 # =====================================================================
 # VERİ SETİ TOPLU İŞLEME VE RAPORLAMA FONKSİYONU
 # =====================================================================
 
-def process_csv(input_filename: str, output_filename: str):
+def process_csv(input_filename: str | Path, output_filename: str | Path):
     """
     Reads the given raw CSV file, extracts features of the URLs inside, and saves them as a new CSV file.
     
     Verilen ham CSV dosyasını okur, içindeki URL'lerin özelliklerini çıkarır
     ve yeni bir CSV dosyası olarak kaydeder.
     """
-    if not os.path.exists(input_filename):
+    input_path = Path(input_filename)
+    output_path = Path(output_filename)
+
+    if not input_path.exists():
         print(f"Hata: '{input_filename}' dosyası bulunamadı!")
         print("Lütfen veri seti dosyanızı bu klasöre kopyalayıp tekrar deneyin.")
         return
         
     print(f"'{input_filename}' okunuyor...")
-    df = pd.read_csv(input_filename)
+    df = pd.read_csv(input_path)
     
     url_column = None
     for col in df.columns:
@@ -361,7 +374,7 @@ def process_csv(input_filename: str, output_filename: str):
     df_features.insert(1, 'is_phishing', df[label_column])
     print(f"Hedef etiket olan '{label_column}' sütunu, 'is_phishing' adıyla ikinci sıraya eklendi.")
         
-    df_features.to_csv(output_filename, index=False)
+    df_features.to_csv(output_path, index=False)
     
     total_elapsed_time = (time.time() - start_time) / 60
     print(f"\nİşlem tamamlandı! Toplam süre: {total_elapsed_time:.2f} dakika.")
@@ -372,8 +385,9 @@ def process_csv(input_filename: str, output_filename: str):
 # =====================================================================
 
 if __name__ == "__main__":
-    input_file = "01_clean_raw_urls.csv"
-    output_file = "02_features_extracted.csv"
+    base_dir = Path(__file__).resolve().parent
+    input_file = base_dir / "01_clean_raw_urls.csv"
+    output_file = base_dir / "02_features_extracted.csv"
     
     # WHOIS sorguları tamamen kaldırıldı
     process_csv(input_file, output_file)

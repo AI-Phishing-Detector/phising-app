@@ -3,13 +3,13 @@ import numpy as np
 from urllib.parse import urlparse
 import joblib
 import warnings
+from pathlib import Path
 
 from sklearn.model_selection import GroupShuffleSplit, GridSearchCV
 from sklearn.ensemble import RandomForestClassifier
 from xgboost import XGBClassifier
 from lightgbm import LGBMClassifier
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from pathlib import Path
 
 warnings.filterwarnings("ignore")
 
@@ -25,7 +25,7 @@ def get_domain(url: str) -> str:
         return "unknown"
 
 
-def load_and_split_data(filepath: str) -> tuple:
+def load_and_split_data(filepath: str | Path) -> tuple:
     """Veriyi yükler, bias yaratan özellikleri siler ve GroupShuffleSplit ile böler."""
     print("Temizlenmiş ve standartlaştırılmış veri seti yükleniyor...")
     df = pd.read_csv(filepath)
@@ -37,7 +37,8 @@ def load_and_split_data(filepath: str) -> tuple:
         'url', 'is_phishing', 'domain_group',
         'alt_dizin_sayisi', 'alt_alan_adi_sayisi',
         'https_var_mi', 'kisaltma_servisi_mi',
-        'url_uzunlugu', 'alan_adi_uzunlugu', 'alan_adi_uzantisi'
+        'url_uzunlugu', 'alan_adi_uzunlugu', 'alan_adi_uzantisi',
+        'soru_isareti_sayisi', 'esittir_sayisi'
     ]
 
     X = df.drop(columns=[col for col in drop_columns if col in df.columns])
@@ -129,11 +130,10 @@ def print_summary_table(results: list) -> None:
 
 if __name__ == "__main__":
     # 1. Dosya Yolları
-    DATASET_PATH = "02_features_extracted.csv"
-
     BASE_DIR = Path(__file__).resolve().parent
+    DATASET_PATH = BASE_DIR / "02_features_extracted.csv"
     MODEL_DIR = BASE_DIR / "model_artifacts"
-    MODEL_DIR.mkdir(exist_ok=True)
+    MODEL_DIR.mkdir(parents=True, exist_ok=True)
     OUTPUT_MODEL_PATH = MODEL_DIR / "phishing_detection_model.pkl"
 
     # 2. Süreci Başlat

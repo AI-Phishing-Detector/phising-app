@@ -1,0 +1,40 @@
+# Bağımlılıklar
+node_modules/
+
+# Expo tarafından oluşturulan dosyalar
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# Yerel ortam ayarları
+.env
+.env.local
+.env.*.local
+
+# Native proje çıktıları
+android/
+ios/
+
+# İşletim sistemi dosyaları
+.DS_Store
+Thumbs.db
+
+# Log dosyaları
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Test çıktıları
+coverage/
+
+# Editör dosyaları
+.vscode/
+.idea/
+
+# Sertifika ve anahtar dosyaları
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
