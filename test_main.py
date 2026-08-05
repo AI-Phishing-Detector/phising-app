@@ -18,6 +18,7 @@ os.environ["TLDEXTRACT_CACHE"] = test_cache_dir.name
 
 import database
 import models
+import auth
 from main import app
 
 test_engine = create_engine(
@@ -225,6 +226,14 @@ TEST_USER = {
     "email": "test@example.com",
     "sifre": "GucluSifre123",
 }
+
+
+def test_password_hash_accepts_short_and_multibyte_passwords():
+    for password in ("kisa", "güçlü-şifre", "🔐" * 30):
+        hashed_password = auth.hash_password(password)
+
+        assert auth.verify_password(password, hashed_password)
+        assert not auth.verify_password("yanlis-sifre", hashed_password)
 
 
 @pytest_asyncio.fixture

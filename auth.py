@@ -1,15 +1,13 @@
 import os
 from datetime import datetime, timedelta, timezone
 
+import bcrypt
 import jwt
 from fastapi import Depends, HTTPException, Request, status
-from passlib.context import CryptContext
 from sqlalchemy.orm import Session
 
 import database
 import models
-
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
@@ -18,12 +16,19 @@ COOKIE_NAME = "access_token"
 COOKIE_SECURE = os.getenv("COOKIE_SECURE", "true").lower() == "true"
 
 
+def _bcrypt_password_bytes(password: str) -> bytes:
+    """Encode and bound input to bcrypt's documented 72-byte limit."""
+    return password.encode("utf-8")[:72]
+
+
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    password_bytes = _bcrypt_password_bytes(password)
+    return bcrypt.hashpw(password_bytes, bcrypt.gensalt()).decode("ascii")
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    password_bytes = _bcrypt_password_bytes(plain_password)
+    return bcrypt.checkpw(password_bytes, hashed_password.encode("ascii"))
 
 
 def create_access_token(user_id: int, email: str) -> str:
