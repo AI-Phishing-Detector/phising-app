@@ -14,6 +14,7 @@ import tldextract
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_DIR = BASE_DIR / "model_artifacts"
 MODEL_PATH = MODEL_DIR / "phishing_detection_model.pkl"
+TLD_EXTRACTOR = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
 
 PHISHING_CLASS = 1
 SAFE_CLASS = 0
@@ -27,18 +28,22 @@ EXCLUDED_FEATURE_COLUMNS = {
     "url_uzunlugu",
     "alan_adi_uzunlugu",
     "alan_adi_uzantisi",
+    "soru_isareti_sayisi",
+    "esittir_sayisi",
 }
 
 TRUSTED_TLDS = {
     "com", "net", "org", "gov", "edu", "mil", "co", "io",
-    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us"
+    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us",
+    "com.tr", "co.uk", "com.au"
 }
 
 POPULAR_BRANDS = {
     "google", "paypal", "netflix", "microsoft", "apple", "amazon",
     "facebook", "instagram", "twitter", "linkedin", "yahoo", "live",
     "outlook", "dropbox", "github", "steam", "spotify", "binance",
-    "coinbase", "americanexpress"
+    "coinbase", "americanexpress", "youtube", "tiktok", "whatsapp",
+    "trendyol", "hepsiburada", "turkiye"
 }
 
 SHORTENERS = {
@@ -74,8 +79,10 @@ def count_suspicious_words(url: str) -> int:
     return sum(url_lower.count(word) for word in SUSPICIOUS_WORDS)
 
 def count_special_chars(url: str) -> int:
-    special_chars = "-_%@=~#&$+;!*(),^|{}[]"
-    return sum(1 for char in url if char in special_chars)
+    parsed = urlparse(url)
+    lexical_target = f"{parsed.hostname or ''}{parsed.path}{parsed.fragment}"
+    special_chars = "-_%@~#$;!*(),^|{}[]"
+    return sum(1 for char in lexical_target if char in special_chars)
 
 def count_digits(url: str) -> int:
     return sum(1 for char in url if char.isdigit())
@@ -134,7 +141,7 @@ def check_brand_spoofing(url: str, domain: str) -> int:
             if domain_lower != brand:
                 return 1
         similarity = difflib.SequenceMatcher(None, normalized_domain, brand).ratio()
-        if 0.80 <= similarity < 1.0:
+        if 0.70 <= similarity < 1.0:
             return 1
     return 0
 
@@ -158,7 +165,7 @@ def extract_features(url: str) -> dict[str, Any]:
         parsed_url = urlparse(cleaned_url)
         hostname = parsed_url.hostname or ""
 
-        extracted = tldextract.extract(cleaned_url)
+        extracted = TLD_EXTRACTOR(cleaned_url)
         domain = extracted.domain
         subdomain = extracted.subdomain
         suffix = extracted.suffix
@@ -221,8 +228,33 @@ def analyze_url(url: str) -> dict[str, Any]:
         for class_name, probability in zip(model.classes_, probabilities)
     }
 
-    phishing_probability = round(probability_by_class.get(PHISHING_CLASS, 0.0) * 100, 2)
-    safe_probability = round(probability_by_class.get(SAFE_CLASS, 0.0) * 100, 2)
+    raw_phishing_probability = probability_by_class.get(PHISHING_CLASS, 0.0) * 100
+
+    # Modelin eğitim kümesindeki barındırma-platformu yanlılığını dengele:
+    # yalnızca sade kök alan adlarında birebir marka eşleşmesini güvenli kabul et;
+    # marka yazım taklitlerini ise yüksek güvenli phishing sinyali olarak uygula.
+    cleaned_url = clean_url(url)
+    extracted = TLD_EXTRACTOR(cleaned_url)
+    normalized_domain = normalize_text(extracted.domain.lower())
+    is_plain_trusted_brand = (
+        normalized_domain in POPULAR_BRANDS
+        and extracted.suffix.lower() in TRUSTED_TLDS
+        and not extracted.subdomain
+        and raw_features.get("alan_adinda_tire_var_mi", 0) == 0
+        and raw_features.get("supheli_kelime_sayisi", 0) == 0
+    )
+
+    calibration = "none"
+    calibrated_probability = raw_phishing_probability
+    if is_plain_trusted_brand:
+        calibrated_probability = min(calibrated_probability, 5.0)
+        calibration = "trusted_brand_root"
+    elif raw_features.get("marka_taklidi_var_mi", 0) == 1:
+        calibrated_probability = max(calibrated_probability, 90.0)
+        calibration = "brand_spoof"
+
+    phishing_probability = round(calibrated_probability, 2)
+    safe_probability = round(100.0 - phishing_probability, 2)
 
     is_phishing = phishing_probability >= (PHISHING_THRESHOLD * 100)
 
@@ -238,6 +270,8 @@ def analyze_url(url: str) -> dict[str, Any]:
         "details": {
             "phishingProbability": phishing_probability,
             "safeProbability": safe_probability,
+            "rawModelPhishingProbability": round(raw_phishing_probability, 2),
+            "calibration": calibration,
             "entropy": round(float(raw_features.get("entropi", 0)), 3),
         },
         "features": raw_features,

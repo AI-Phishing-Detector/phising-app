@@ -21,7 +21,8 @@ TLD_EXTRACTOR = tldextract.TLDExtract(cache_dir=None, suffix_list_urls=())
 # Güvenilir ve yaygın kullanılan alan adı uzantıları (Beyaz Liste)
 TRUSTED_TLDS = {
     "com", "net", "org", "gov", "edu", "mil", "co", "io", 
-    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us"
+    "me", "tv", "info", "biz", "tr", "uk", "de", "fr", "us",
+    "com.tr", "co.uk", "com.au"
 }
 
 # Oltalama saldırılarında en çok taklit edilen popüler markalar
@@ -29,7 +30,8 @@ POPULAR_BRANDS = {
     "google", "paypal", "netflix", "microsoft", "apple", "amazon", 
     "facebook", "instagram", "twitter", "linkedin", "yahoo", "live", 
     "outlook", "dropbox", "github", "steam", "spotify", "binance", 
-    "coinbase", "americanexpress"
+    "coinbase", "americanexpress", "youtube", "tiktok", "whatsapp",
+    "trendyol", "hepsiburada", "turkiye"
 }
 
 # Popüler link kısaltma servislerinin alan adları
@@ -75,8 +77,12 @@ def count_special_chars(url: str) -> int:
     Count of special characters (-_%@=~) commonly used in malicious URLs.
     Kötü amaçlı URL'lerde yaygın olarak kullanılan özel karakterlerin (-_%@=~) sayısı.
     """
-    special_chars = "-_%@=~#&$+;!*(),^|{}[]"
-    return sum(1 for char in url if char in special_chars)
+    # Query ayraçları (?, =, &, +) tek başına risk sinyali değildir.
+    # Bu nedenle yalnızca host/path/fragment içindeki karakterleri sayıyoruz.
+    parsed = urlparse(url)
+    lexical_target = f"{parsed.hostname or ''}{parsed.path}{parsed.fragment}"
+    special_chars = "-_%@~#$;!*(),^|{}[]"
+    return sum(1 for char in lexical_target if char in special_chars)
 
 def count_digits(url: str) -> int:
     """
@@ -181,7 +187,7 @@ def check_brand_spoofing(url: str, domain: str) -> int:
                 
         # Metin benzerliğini ölç (Örn: goggle vs google)
         similarity = difflib.SequenceMatcher(None, normalized_domain, brand).ratio()
-        if 0.80 <= similarity < 1.0:
+        if 0.70 <= similarity < 1.0:
             return 1
             
     return 0

@@ -37,7 +37,8 @@ def load_and_split_data(filepath: str | Path) -> tuple:
         'url', 'is_phishing', 'domain_group',
         'alt_dizin_sayisi', 'alt_alan_adi_sayisi',
         'https_var_mi', 'kisaltma_servisi_mi',
-        'url_uzunlugu', 'alan_adi_uzunlugu', 'alan_adi_uzantisi'
+        'url_uzunlugu', 'alan_adi_uzunlugu', 'alan_adi_uzantisi',
+        'soru_isareti_sayisi', 'esittir_sayisi'
     ]
 
     X = df.drop(columns=[col for col in drop_columns if col in df.columns])
